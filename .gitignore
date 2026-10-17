@@ -1,0 +1,5 @@
+node_modules
+.opencode/context-inspector
+*.log
+e2e/project/.opencode
+e2e/project/opencode.jsonc

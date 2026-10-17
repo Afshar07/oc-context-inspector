@@ -1,0 +1,27 @@
+{
+  "name": "opencode-context-inspector",
+  "version": "0.1.0",
+  "description": "OpenCode V2 plugin that records which project-context files an agent explicitly reads.",
+  "type": "module",
+  "license": "MIT",
+  "files": ["index.ts", "src"],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.32"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "effect": "4.0.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
