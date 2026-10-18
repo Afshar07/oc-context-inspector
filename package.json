@@ -19,7 +19,6 @@
     "e2e": "bash e2e/run.sh"
   },
   "dependencies": {
-    "@afshar7/toolkit": "^1.2.0",
     "@opencode/plugin": "2.0.32"
   },
   "peerDependencies": {
