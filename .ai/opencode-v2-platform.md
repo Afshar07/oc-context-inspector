@@ -5,7 +5,7 @@ Verified against `@opencode/plugin@2.0.32` and `opencode` CLI `2.0.32` (the pinn
 ## Plugin API surface used
 
 - Server: `Plugin.define({ id, setup(ctx) })` from `@opencode/plugin`. Used: `ctx.options`, `ctx.location.directory`, `ctx.tool.hook("execute.before"|"execute.after")`, `ctx.session.hook("context")`, `ctx.session.get`, `ctx.rpc.register`, `ctx.generate.text`, `ctx.model.default`.
-- TUI: `Plugin.define` from `@opencode/plugin/tui`. Used: `ctx.ui.slot/panel/dialog/toast/tabs/router`, `ctx.keymap.layer/mode`, `ctx.storage.store`, `ctx.data.session`, `ctx.rpc` client.
+- TUI: `Plugin.define` from `@opencode/plugin/tui`. Used: `ctx.ui.slot/panel/dialog/toast/tabs/router`, `ctx.keymap.layer/mode`, `ctx.storage.store`, `ctx.data.session` (`get`, `message.sync/list`), `ctx.client.session` (`fork`, `create`, `update`, `switchModel`, `synthetic`, `list`), `ctx.rpc` client.
 - `ctx.generate.text` runs outside the conversation, so analysis never changes the session.
 
 ## Tool facts
@@ -14,6 +14,8 @@ Verified against `@opencode/plugin@2.0.32` and `opencode` CLI `2.0.32` (the pinn
 - `execute.after` carries the result; its first line is `Read file X, lines A-B` (or `, 0 lines` for an empty file). Paged results add `offset`/`next`/`truncated`.
 - Instructions OpenCode injects itself (auto-loaded `AGENTS.md`) bypass the tool hooks and are never recorded; that is why `autoLoaded` exists.
 - A subagent is a child *session*. Lead/subagent are properties of the session; an agent switch inside one session appears as a second agent of that session. Stock subagents cannot spawn further agents.
+- Child sessions are listed with `ctx.client.session.list({ parentID, order, limit, cursor })` (paged, `{ data, cursor.next }`; `SessionInfo` carries `parentID` and `agent`). The plugin-facing `ctx.data.session.sync(id)` has no `children` option in its type, though the client store has one; `ctx.data.session.family(id)` only knows sessions already loaded. Discovery therefore uses `client.session.list`.
+- Tool call ids are unique only within a session; lead and subagents can share one.
 
 ## Build and packaging constraints
 
@@ -25,5 +27,6 @@ Verified against `@opencode/plugin@2.0.32` and `opencode` CLI `2.0.32` (the pinn
 ## Known limits (not tracked debt)
 
 - Nested delegation is covered by unit tests only (E2E cannot spawn it).
+- `client.session.list({ parentID })` discovery is unit-tested with a fake listing; it has not been exercised live (see `ongoing/timeline-live-verification.md`).
 - The TUI is covered by unit tests of its formatting and data logic, not by the E2E.
 - Section outlines come from Markdown `#` headings; a headingless file is one section.

@@ -22,14 +22,14 @@ Both halves share `id: "opencode-context-inspector"` and `src/types.ts`. Update 
 | `store.ts` | JSONL append/read, session markers, `tracking.json`. Session IDs are sanitized into file names |
 | `sessions.ts` | `SessionObserver` (marks a session observed once, resolves parent), `SessionRegistry` (lists sessions, ancestors, tracking start) |
 | `coverage.ts` | `CoverageService`: per-file status, merged ranges, certainty, changed/deleted detection, per-agent repeat/handoff accounting, file preview |
-| `analysis.ts` | `AnalysisService`: builds the session and project prompts, `aggregateUsage`, outlines/sections, `ContentBudget`. Calls an injected `Generate` |
-| `rpc.ts` | `ContextInspectorRpc` schema (`coverage`, `preview`, `analyzeSession`, `reviewProject`, `read` event) |
+| `analysis.ts` | `AnalysisService`: builds the session and project prompts (session prompt includes the timeline: `formatTimeline`, `readKey`), `aggregateUsage`, outlines/sections, `ContentBudget`. Calls an injected `Generate` |
+| `rpc.ts` | `ContextInspectorRpc` schema (`coverage`, `preview`, `analyzeSession` with optional `timeline`, `reviewProject`, `read` event) |
 | `model-ref.ts` | `provider/model[#variant]` parse and format |
 | `types.ts` | All shared types. `E*` enums, `I*` interfaces |
 
 ## TUI modules (`src/tui/`)
 
-`timeline.ts` and `descendants.ts` build the reviewer timeline (below). `index.tsx` registers slots (`sidebar.content`, `session.panel`, `app`) and keymap layers (commands plus browse mode). `client.ts` wraps the RPC and the follow-up-session creation. `source.ts` is the data hook/resource layer. `format.ts`, `markdown-parse.ts` and `handoff.ts` are pure logic (unit-tested); `Sidebar`, `Preview`, `Analysis`, `AnswerMarkdown` are Solid components.
+`timeline.ts` and `descendants.ts` build the reviewer timeline (below). `index.tsx` registers slots (`sidebar.content`, `session.panel`, `app`) and keymap layers (commands plus browse mode). `client.ts` wraps the RPC, the follow-up-session creation and the timeline loading (`sessionTimeline`). `source.ts` is the data hook/resource layer. `format.ts`, `markdown-parse.ts` and `handoff.ts` are pure logic (unit-tested); `Sidebar`, `Preview`, `Analysis`, `AnswerMarkdown` are Solid components.
 
 ## Data flow
 
