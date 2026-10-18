@@ -11,7 +11,7 @@ import { describeFile, STATUS_GLYPH, visibleFiles } from "./format.js";
 import { handoffMessage } from "./handoff.js";
 import { Preview } from "./Preview.js";
 import { Sidebar } from "./Sidebar.js";
-import type { ICoverageClient } from "./source.js";
+import type { IAnalysisResult, ICoverageClient } from "./source.js";
 
 const PANEL_NAME = "context-inspector.preview";
 const EVALUATION_PANEL = "context-inspector.evaluate";
@@ -33,6 +33,10 @@ export default Plugin.define({
     const [prefs, setPrefs] = ctx.storage.store("prefs", { initial: { showUnread: false, collapsed: false, analysisModel: DEFAULT_MODEL } });
     // Model picked for the analysis panel currently open; read by its resource, so a new pick reruns it.
     const [analysisModel, setAnalysisModel] = createSignal<string>();
+    // Last successful answer per mode and session, so leaving a session and coming back shows it again.
+    // Memory only: answers can quote context files, so they are not written to disk.
+    const answers = new Map<string, IAnalysisResult>();
+    const answerKey = (mode: EAnalysisMode, sessionID: string) => `${mode}:${sessionID}`;
     const browse = createBrowseState(ctx, client, () => prefs.showUnread);
 
     const setCollapsed = (collapsed: boolean) =>
@@ -49,12 +53,15 @@ export default Plugin.define({
       if (!ctx.ui.panel.open(PANEL_NAME)) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
     };
     const openAnalysis = async (mode: EAnalysisMode, sessionID: string) => {
-      const picked = await pickAnalysisModel(ctx, sessionID, prefs.analysisModel ?? DEFAULT_MODEL);
-      if (picked === undefined) return;
-      await setPrefs((draft) => {
-        draft.analysisModel = picked;
-      });
-      setAnalysisModel(picked === DEFAULT_MODEL ? undefined : picked);
+      // A kept answer opens straight away; `r` reruns it with the model last picked.
+      if (!answers.has(answerKey(mode, sessionID))) {
+        const picked = await pickAnalysisModel(ctx, sessionID, prefs.analysisModel ?? DEFAULT_MODEL);
+        if (picked === undefined) return;
+        await setPrefs((draft) => {
+          draft.analysisModel = picked;
+        });
+        setAnalysisModel(picked === DEFAULT_MODEL ? undefined : picked);
+      }
       if (!ctx.ui.panel.open(ANALYSIS_PANELS[mode])) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
     };
     // Follow-up session for acting on a review: the review waits, queued, for the user's first instruction.
@@ -141,6 +148,8 @@ export default Plugin.define({
                 panel={input}
                 mode="session"
                 model={analysisModel()}
+                cached={answers.get(answerKey("session", input.sessionID))}
+                onResult={(result) => answers.set(answerKey("session", input.sessionID), result)}
                 onContinue={continueInSession("session", input.sessionID)}
                 onExperiment={() => void startExperiment("session", input.sessionID)()}
               />
@@ -152,6 +161,8 @@ export default Plugin.define({
                 panel={input}
                 mode="project"
                 model={analysisModel()}
+                cached={answers.get(answerKey("project", input.sessionID))}
+                onResult={(result) => answers.set(answerKey("project", input.sessionID), result)}
                 onContinue={continueInSession("project", input.sessionID)}
                 onExperiment={() => void startExperiment("project", input.sessionID)()}
               />

@@ -14,6 +14,10 @@ export interface IAnalysisProps {
   readonly mode: EAnalysisMode;
   /** `provider/model` picked for this run; undefined for the configured default. */
   readonly model: string | undefined;
+  /** Answer kept from an earlier open of this panel; shown instead of asking the model again. `r` still reruns. */
+  readonly cached: IAnalysisResult | undefined;
+  /** Receives each successful answer so it outlives this panel (closing it or switching sessions unmounts it). */
+  readonly onResult: (result: IAnalysisResult) => void;
   /** Opens a follow-up session seeded with this answer: a new session, or a fork of the analyzed one. */
   readonly onContinue: (answer: Extract<IAnalysisResult, { ok: true }>, fork: boolean) => Promise<void>;
   /** Starts the create-experiment dialogs for the reviewed session (or project). Nothing runs or changes until the user confirms. */
@@ -25,14 +29,18 @@ const TITLES: Readonly<Record<EAnalysisMode, string>> = {
   project: "Context review: all sessions",
 };
 
-/** Session panel: a model's reading of the recorded context usage. Runs once per open; `r` reruns. */
+/** Session panel: a model's reading of the recorded context usage. Runs once per session unless a kept answer exists; `r` reruns. */
 export function Analysis(props: IAnalysisProps) {
   const theme = props.ctx.theme;
   const [run, setRun] = createSignal(0);
   const [result] = createResource(
     () => ({ sessionID: props.panel.sessionID, mode: props.mode, model: props.model, run: run() }),
-    ({ sessionID, mode, model }) =>
-      mode === "session" ? props.client.analyzeSession(sessionID, model) : props.client.reviewProject(sessionID, model),
+    async ({ sessionID, mode, model, run }) => {
+      if (run === 0 && props.cached) return props.cached;
+      const answer = await (mode === "session" ? props.client.analyzeSession(sessionID, model) : props.client.reviewProject(sessionID, model));
+      if (answer.ok) props.onResult(answer);
+      return answer;
+    },
   );
 
   const [continuing, setContinuing] = createSignal(false);

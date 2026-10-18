@@ -112,6 +112,10 @@ the conversation and do not change it.
   trim), and a short list of concrete edits. The prompt states how many sessions were observed and how many are older
   reads-only sessions, so the model does not over-trust the ratios.
 
+The last answer for each session is kept in memory while the TUI runs: close the panel or switch sessions and
+`/context-analyze` (or `/context-review`) shows it again without asking the model. Press **`r`** to rerun. Answers are
+not written to disk (they can quote context files), so restarting the TUI clears them.
+
 Press **`e`** in the panel to turn a review into a measured [context experiment](#context-experiments).
 
 **Acting on a review: `n` in the panel** opens a follow-up session where an agent can make the changes:
