@@ -4,7 +4,11 @@
   "description": "OpenCode V2 plugin that records which project-context files an agent explicitly reads.",
   "type": "module",
   "license": "MIT",
-  "files": ["index.ts", "tui.ts", "src"],
+  "files": [
+    "index.ts",
+    "tui.ts",
+    "src"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./tui": "./tui.ts"
@@ -15,6 +19,7 @@
     "e2e": "bash e2e/run.sh"
   },
   "dependencies": {
+    "@afshar7/toolkit": "^1.2.0",
     "@opencode/plugin": "2.0.32"
   },
   "peerDependencies": {
