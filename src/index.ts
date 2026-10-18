@@ -5,6 +5,7 @@ import { CoverageService } from "./coverage.js";
 import { ContextPathMatcher, DEFAULT_CONTEXT_PATHS } from "./matcher.js";
 import { formatModelRef, parseModelRef } from "./model-ref.js";
 import { ContextInspectorRpc } from "./rpc.js";
+import { SessionObserver, SessionRegistry, startTracking } from "./sessions.js";
 import { JsonlContextReadStore } from "./store.js";
 import { ContextReadTracker } from "./tracker.js";
 import type { IContextInspectorOptions, IContextReadStore, IModelRef } from "./types.js";
@@ -12,6 +13,7 @@ import type { IContextInspectorOptions, IContextReadStore, IModelRef } from "./t
 export { ContextPathMatcher, ContextReadTracker, CoverageService, JsonlContextReadStore };
 export { ContextInspectorRpc } from "./rpc.js";
 export { readSessionRecords } from "./store.js";
+export { SessionObserver, SessionRegistry } from "./sessions.js";
 export { parseModelRef } from "./model-ref.js";
 export * from "./types.js";
 
@@ -78,13 +80,15 @@ export default Plugin.define({
   async setup(ctx) {
     const options = resolveOptions(ctx.options, ctx.location.directory);
     const matcher = new ContextPathMatcher(ctx.location.directory, options.contextPaths);
-    const coverage = new CoverageService(ctx.location.directory, matcher, options);
+    const registry = new SessionRegistry(options.dataDir);
+    const coverage = new CoverageService(ctx.location.directory, matcher, options, registry);
     const { includeContent } = options.analysis;
     const analysis = new AnalysisService(
       coverage,
       options.dataDir,
       async (prompt, model) => (await ctx.generate.text({ prompt, ...(model && { model }) })).text,
       { includeContent },
+      registry,
     );
 
     // Serves the TUI sidebar. Recording must keep working if RPC is unavailable.
@@ -98,10 +102,25 @@ export default Plugin.define({
       async append(record) {
         await jsonl.append(record);
         // A live-update hint only; the TUI refetches, so a lost event just delays it.
-        rpc?.events.emit("read", { sessionID: record.sessionID, filePath: record.filePath }).catch(() => {});
+        // `ancestors` lets the sidebar of a lead session refresh when a subagent reads.
+        const ancestors = await registry.ancestors(record.sessionID).catch(() => []);
+        rpc?.events.emit("read", { sessionID: record.sessionID, filePath: record.filePath, ancestors }).catch(() => {});
       },
     };
-    const tracker = new ContextReadTracker(matcher, new Set(options.tools), store);
+    // Which sessions exist, and who spawned them, comes from OpenCode; a failed lookup leaves the lineage unknown.
+    const observer = new SessionObserver(options.dataDir, async (sessionID) => {
+      const session = await ctx.session.get({ sessionID });
+      return session ? { ...(session.parentID !== undefined && { parentID: session.parentID }) } : undefined;
+    });
+    const tracker = new ContextReadTracker(matcher, new Set(options.tools), store, undefined, { sessions: observer });
+    startTracking(options.dataDir).catch(() => {});
+
+    // A session that only talks (no tool call) still ran, so a zero-read session is a fact, not a gap.
+    try {
+      await ctx.session.hook("context", (event) => {
+        observer.observe(event.sessionID).catch(() => {});
+      });
+    } catch {}
 
     // Observer only: a failure here must never reach the agent, so errors are swallowed.
     await ctx.tool.hook("execute.before", (event) => {

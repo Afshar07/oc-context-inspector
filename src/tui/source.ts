@@ -3,11 +3,25 @@ import type { ICoverageReport, IFilePreview } from "../types.js";
 export interface IReadEvent {
   readonly sessionID: string;
   readonly filePath: string;
+  /** Sessions that spawned `sessionID`, nearest first. */
+  readonly ancestors?: readonly string[];
+}
+
+/** A read in `sessionID`, or in a session it spawned, changes what that session's view shows. */
+export function concerns(event: IReadEvent, sessionID: string): boolean {
+  return event.sessionID === sessionID || (event.ancestors?.includes(sessionID) ?? false);
 }
 
 /** A model's answer, or why there is none (no provider, rate limit, ...). */
 export type IAnalysisResult =
-  | { readonly ok: true; readonly text: string; readonly model: string; readonly sessionCount?: number }
+  | {
+      readonly ok: true;
+      readonly text: string;
+      readonly model: string;
+      readonly sessionCount?: number;
+      /** Of `sessionCount`, sessions known only from read records written before session tracking. */
+      readonly readsOnlySessions?: number;
+    }
   | { readonly ok: false; readonly error: string };
 
 /** What the TUI needs from the server; the RPC adapter is the only implementation. */
@@ -52,7 +66,7 @@ export function watchCoverage(
   };
 
   const unsubscribe = client.onRead((event) => {
-    if (event.sessionID !== sessionID || timer !== undefined) return;
+    if (!concerns(event, sessionID) || timer !== undefined) return;
     timer = setTimeout(() => {
       timer = undefined;
       fetch();

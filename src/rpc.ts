@@ -1,11 +1,32 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
-import { ECoverageStatus, type ICoverageReport, type IFilePreview } from "./types.js";
+import {
+  EAgentRole,
+  ECoverageCertainty,
+  ECoverageStatus,
+  ESessionTracking,
+  type ICoverageReport,
+  type IFilePreview,
+} from "./types.js";
 
 /** RPC methods/events need Standard Schema on both ends; Effect schemas provide it. */
 const portable = <S extends Schema.ConstraintDecoder<unknown>>(schema: S) => Schema.toStandardSchemaV1(schema);
 
 const LineRange = Schema.Struct({ start: Schema.Number, end: Schema.Number });
+
+const AgentReadSummary = Schema.Struct({
+  sessionID: Schema.String,
+  agentID: Schema.optionalKey(Schema.String),
+  role: Schema.Enum(EAgentRole),
+  parentSessionID: Schema.optionalKey(Schema.String),
+  depth: Schema.Number,
+  readCount: Schema.Number,
+  errorCount: Schema.Number,
+  repeatReads: Schema.Number,
+  handoffRereads: Schema.Number,
+  ranges: Schema.Array(LineRange),
+  lastReadAt: Schema.optionalKey(Schema.String),
+});
 
 const FileCoverage = Schema.Struct({
   filePath: Schema.String,
@@ -17,10 +38,16 @@ const FileCoverage = Schema.Struct({
   errorCount: Schema.Number,
   lastReadAt: Schema.optionalKey(Schema.String),
   modifiedSinceRead: Schema.Boolean,
+  certainty: Schema.Enum(ECoverageCertainty),
+  lineCountAtRead: Schema.optionalKey(Schema.Number),
+  agents: Schema.Array(AgentReadSummary),
+  repeatReads: Schema.Number,
+  handoffRereads: Schema.Number,
 });
 
 const CoverageReport = Schema.Struct({
   sessionID: Schema.String,
+  tracking: Schema.Enum(ESessionTracking),
   files: Schema.Array(FileCoverage),
 });
 
@@ -28,6 +55,7 @@ const FilePreview = Schema.Struct({
   coverage: FileCoverage,
   lines: Schema.Array(Schema.String),
   truncated: Schema.Boolean,
+  contentMayDiffer: Schema.Boolean,
 });
 
 const Failure = Schema.Struct({ ok: Schema.Literal(false), error: Schema.String });
@@ -62,7 +90,13 @@ export const ContextInspectorRpc = Rpc.define({
       input: portable(Schema.Struct({ model: Schema.optionalKey(Schema.String) })),
       output: portable(
         Schema.Union([
-          Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, sessionCount: Schema.Number, model: Schema.String }),
+          Schema.Struct({
+            ok: Schema.Literal(true),
+            text: Schema.String,
+            sessionCount: Schema.Number,
+            readsOnlySessions: Schema.Number,
+            model: Schema.String,
+          }),
           Failure,
         ]),
       ),
@@ -80,6 +114,15 @@ export const ContextInspectorRpc = Rpc.define({
   },
   events: {
     /** A context-file read was recorded; payload is metadata only. */
-    read: { schema: portable(Schema.Struct({ sessionID: Schema.String, filePath: Schema.String })) },
+    read: {
+      schema: portable(
+        Schema.Struct({
+          sessionID: Schema.String,
+          filePath: Schema.String,
+          /** Sessions that spawned this one, nearest first; absent from older servers. */
+          ancestors: Schema.optionalKey(Schema.Array(Schema.String)),
+        }),
+      ),
+    },
   },
 });

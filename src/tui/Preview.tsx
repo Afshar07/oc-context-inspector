@@ -2,8 +2,8 @@
 import type { Plugin } from "@opencode/plugin/tui";
 import type { PanelInput } from "@opencode/plugin/tui/context";
 import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js";
-import { describeFile, isLineRead, STATUS_GLYPH } from "./format.js";
-import type { ICoverageClient } from "./source.js";
+import { agentLines, describeFile, isLineRead, previewNotice, STATUS_GLYPH } from "./format.js";
+import { concerns, type ICoverageClient } from "./source.js";
 import { statusColor } from "./theme.js";
 
 export interface IPreviewProps {
@@ -23,7 +23,7 @@ export function Preview(props: IPreviewProps) {
     const filePath = props.filePath;
     onCleanup(
       props.client.onRead((event) => {
-        if (event.sessionID === sessionID && event.filePath === filePath) setVersion((v) => v + 1);
+        if (concerns(event, sessionID) && event.filePath === filePath) setVersion((v) => v + 1);
       }),
     );
   });
@@ -61,6 +61,20 @@ export function Preview(props: IPreviewProps) {
       <Show when={preview()?.coverage.exists === false}>
         <text fg={theme.text.muted}>The file does not exist on disk.</text>
       </Show>
+      <Show when={preview() && previewNotice(preview()!)}>
+        {(notice) => (
+          <text wrapMode="word" flexShrink={0} fg={theme.text.feedback.warning.base}>
+            {notice()}
+          </text>
+        )}
+      </Show>
+      <For each={preview() ? agentLines(preview()!.coverage) : []}>
+        {(line) => (
+          <text wrapMode="none" truncate flexShrink={0} fg={theme.text.muted}>
+            {line}
+          </text>
+        )}
+      </For>
       <scrollbox flexGrow={1} focused={props.panel.focused}>
         <For each={preview()?.lines ?? []}>
           {(line, index) => {
@@ -83,7 +97,7 @@ export function Preview(props: IPreviewProps) {
         </Show>
       </scrollbox>
       <text flexShrink={0} fg={theme.text.faint}>
-        ▌ read by the agent · dim: not read{preview()?.coverage.modifiedSinceRead ? " · file changed since it was read" : ""} · esc close
+        ▌ {preview()?.contentMayDiffer ? "marked per the agent's read (may not match this text)" : "read by the agent"} · dim: not read · esc close
       </text>
     </box>
   );

@@ -13,5 +13,7 @@ export function statusColor(theme: Plugin.Context["theme"], status: ECoverageSta
       return theme.text.feedback.info.base;
     case ECoverageStatus.Unread:
       return theme.text.faint;
+    case ECoverageStatus.Unknown:
+      return theme.text.muted;
   }
 }

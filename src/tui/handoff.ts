@@ -28,7 +28,7 @@ export function handoffMessage(input: IHandoffInput): string {
             const detail = describeFile(f);
             return `- ${STATUS_GLYPH[f.status]} ${f.filePath}${detail ? ` — ${detail}` : ""}`;
           })
-          .join("\n")}\n(● fully read · ◐ partly read · ○ not read · ◌ auto-loaded · ✕ read failed)`
+          .join("\n")}\n(● fully read · ◐ partly read · ○ not read · ◌ auto-loaded · ✕ read failed · ? coverage unknown · ~ estimated)`
       : "";
   return `# Context review (opencode-context-inspector)
 

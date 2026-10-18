@@ -12,6 +12,26 @@ const SCRIPTS = {
     ["read", { path: "src/app.ts" }],
     ["read", { path: "AGENTS.md" }],
   ],
+  // Edge cases: empty file, offset past the end (fails), whole file longer than the 2000-line page, last page, offset 0.
+  "SCENARIO-C": [
+    ["read", { path: ".ai/empty.md" }],
+    ["read", { path: ".ai/short.md", offset: 5 }],
+    ["read", { path: ".ai/long.md" }],
+    ["read", { path: ".ai/long.md", offset: 2400, limit: 500 }],
+    ["read", { path: ".ai/long.md", offset: 0 }],
+  ],
+  // Answers without any tool call: a session that reads nothing.
+  "SCENARIO-D": [],
+  // Delegates to a subagent (SCENARIO-S), then reads on its own.
+  "SCENARIO-E": [
+    ["subagent", { agent: "general", description: "Read context", prompt: "SCENARIO-S read the context" }],
+    ["read", { path: ".ai/style.md", limit: 3 }],
+  ],
+  // The subagent's own reads. (OpenCode's stock subagents cannot delegate further, so nesting is unit-tested only.)
+  "SCENARIO-S": [
+    ["read", { path: "AGENTS.md" }],
+    ["read", { path: ".ai/architecture.md", offset: 1, limit: 10 }],
+  ],
   "SCENARIO-B": [
     ["read", { path: ".ai/style.md", limit: 5 }],
     ["read", { path: "AGENTS.md", offset: 2 }],

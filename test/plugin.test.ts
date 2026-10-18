@@ -98,7 +98,7 @@ describe("plugin RPC", () => {
       const input = { path: ".ai/x.md", offset: 2, limit: 1 };
       await hooks["execute.before"]!({ tool: "read", sessionID: "s1", id: "c1", input });
       await hooks["execute.after"]!({ tool: "read", sessionID: "s1", id: "c1", input, status: "completed" });
-      expect(rpc.emitted).toEqual([["read", { sessionID: "s1", filePath: ".ai/x.md" }]]);
+      expect(rpc.emitted).toEqual([["read", { sessionID: "s1", filePath: ".ai/x.md", ancestors: [] }]]);
 
       const report = (await rpc.handlers.coverage!({ sessionID: "s1" })) as ICoverageReport;
       expect(report.files.find((f) => f.filePath === ".ai/x.md")).toMatchObject({
@@ -134,6 +134,7 @@ describe("plugin RPC analysis", () => {
         ok: true,
         text: "looks fine",
         sessionCount: 0,
+        readsOnlySessions: 0,
         model: "anthropic/claude-x#high",
       });
     }));

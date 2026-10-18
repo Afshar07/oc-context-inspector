@@ -12,6 +12,52 @@ export interface IRequestedRange {
   readonly limit?: number;
 }
 
+/** 1-based, inclusive line range. */
+export interface ILineRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Whether the session is a root (lead) session or was spawned by another one. Absent when OpenCode could not tell. */
+export enum ESessionLineage {
+  Root = "root",
+  Child = "child",
+}
+
+/** Who performed a read, derived from the session lineage; never guessed. */
+export enum EAgentRole {
+  Lead = "lead",
+  Subagent = "subagent",
+  Unknown = "unknown",
+}
+
+/** Where the delivered line range of a read came from. */
+export enum EDeliverySource {
+  /** The `Read file X, lines A-B` header of the tool result. */
+  Header = "header",
+  /** `offset` and the line count of a paged tool result. */
+  Page = "page",
+}
+
+/** What a successful read actually returned to the agent. Line numbers only: never contents. */
+export interface IDeliveredRead {
+  readonly source: EDeliverySource;
+  /** Lines returned; 0 for an empty file. */
+  readonly lineCount: number;
+  /** Lines returned; absent when none were. */
+  readonly range?: ILineRange;
+  /** The result ended at the end of the file (the tool reported no further page). */
+  readonly reachedEof: boolean;
+  /** The file's total line count when it was read; known only when `reachedEof`. */
+  readonly fileLines?: number;
+}
+
+/** Identifies the version of a file at read time without storing its contents. */
+export interface IFileFingerprint {
+  readonly mtimeMs: number;
+  readonly sizeBytes: number;
+}
+
 /** One explicit read of a context file. Metadata only: never contains file contents. */
 export interface IContextReadRecord {
   readonly sessionID: string;
@@ -28,6 +74,18 @@ export interface IContextReadRecord {
   /** ISO timestamps of `execute.before` / `execute.after`. */
   readonly startedAt: string;
   readonly completedAt: string;
+  /** Agent that made the call (`agent` of the `execute.*` event). Absent in records written before attribution existed. */
+  readonly agentID?: string;
+  /** Message of the session the call belongs to. */
+  readonly messageID?: string;
+  /** Present when the session was spawned by another one (a subagent). */
+  readonly parentSessionID?: string;
+  /** Absent when the session lookup failed or the record predates attribution. */
+  readonly lineage?: ESessionLineage;
+  /** What the tool returned. Absent for failed reads, records written before this existed, and unparseable results. */
+  readonly delivered?: IDeliveredRead;
+  /** The file's mtime and size just before the read. Absent when it could not be stat'ed. */
+  readonly fileAtRead?: IFileFingerprint;
 }
 
 /** Plugin options (`ctx.options`). */
@@ -63,6 +121,15 @@ export interface IToolBeforeEvent {
   readonly sessionID: string;
   readonly id: string;
   readonly input: unknown;
+  readonly agent?: string;
+  readonly messageID?: string;
+}
+
+/** The subset of a V2 `Tool.Result` the tracker inspects; read, never written. */
+export interface IToolResultLike {
+  readonly output?: unknown;
+  readonly content?: unknown;
+  readonly metadata?: unknown;
 }
 
 /** The subset of the V2 `tool.hook("execute.after")` event the tracker reads. */
@@ -72,6 +139,9 @@ export interface IToolAfterEvent {
   readonly id: string;
   readonly status: "completed" | "error";
   readonly error?: { readonly message: string };
+  readonly agent?: string;
+  readonly messageID?: string;
+  readonly result?: IToolResultLike;
 }
 
 export interface IContextReadStore {
@@ -80,6 +150,37 @@ export interface IContextReadStore {
 
 export interface IClock {
   now(): Date;
+}
+
+/** How a session came to be known to the inspector. */
+export enum ESessionTracking {
+  /** The plugin saw the session run, so zero reads is a fact. */
+  Observed = "observed",
+  /** Known only from read records written before session tracking existed; sessions without reads are missing. */
+  ReadsOnly = "reads-only",
+  /** Never seen by the plugin: nothing can be said about its reads. */
+  Unobserved = "unobserved",
+}
+
+/** A session the inspector knows about. */
+export interface ISessionObservation {
+  readonly sessionID: string;
+  readonly tracking: ESessionTracking;
+  readonly parentSessionID?: string;
+  readonly lineage?: ESessionLineage;
+  /** ISO time the plugin first saw the session; absent for reads-only sessions. */
+  readonly firstObservedAt?: string;
+}
+
+/** Who spawned a session. Empty when OpenCode could not be asked. */
+export interface ISessionLineage {
+  readonly lineage?: ESessionLineage;
+  readonly parentSessionID?: string;
+}
+
+/** Marks sessions as observed and resolves who spawned them. */
+export interface ISessionObserver {
+  observe(sessionID: string): Promise<ISessionLineage>;
 }
 
 /** Per-file verdict shown by the TUI. */
@@ -94,12 +195,38 @@ export enum ECoverageStatus {
   Full = "full",
   /** Only failed reads. */
   Error = "error",
+  /** Reads succeeded, but what they covered cannot be told (e.g. the file was deleted and the reads left no delivery record). */
+  Unknown = "unknown",
 }
 
-/** 1-based, inclusive line range. */
-export interface ILineRange {
-  readonly start: number;
-  readonly end: number;
+/** How far the line ranges of a file's coverage can be trusted. */
+export enum ECoverageCertainty {
+  /** Ranges are what the tool returned, and the file is unchanged since. */
+  Confirmed = "confirmed",
+  /** Ranges are what the tool returned, but the file was changed or deleted since: they describe the file as it was read. */
+  Stale = "stale",
+  /** At least one range is only the requested one (no delivery information): the real range may differ. */
+  Estimated = "estimated",
+}
+
+/** What one agent (in one session) read of a file. */
+export interface IAgentReadSummary {
+  readonly sessionID: string;
+  /** Absent for records written before attribution existed. */
+  readonly agentID?: string;
+  readonly role: EAgentRole;
+  readonly parentSessionID?: string;
+  /** 0 for the viewed session, 1 for the sessions it spawned, and so on. */
+  readonly depth: number;
+  readonly readCount: number;
+  readonly errorCount: number;
+  /** Successful reads that re-read lines this same agent had already received. */
+  readonly repeatReads: number;
+  /** Successful reads that re-read lines a different agent had already received. */
+  readonly handoffRereads: number;
+  /** Merged ranges this agent received (or requested, when delivery is unknown). */
+  readonly ranges: readonly ILineRange[];
+  readonly lastReadAt?: string;
 }
 
 export interface IFileCoverage {
@@ -108,18 +235,28 @@ export interface IFileCoverage {
   readonly status: ECoverageStatus;
   /** False for paths that were requested but are not (or no longer) files on disk. */
   readonly exists: boolean;
+  /** Current line count on disk; 0 when the file is gone. */
   readonly lineCount: number;
-  /** Merged ranges of successful reads, clamped to the file. */
+  /** Merged ranges of successful reads of this session. See `certainty` for what they mean. */
   readonly ranges: readonly ILineRange[];
   readonly readCount: number;
   readonly errorCount: number;
   readonly lastReadAt?: string;
   /** The file changed on disk after its last successful read. */
   readonly modifiedSinceRead: boolean;
+  readonly certainty: ECoverageCertainty;
+  /** The file's line count when it was read, when the tool reported it. */
+  readonly lineCountAtRead?: number;
+  /** Per agent, for this session and the sessions it spawned. */
+  readonly agents: readonly IAgentReadSummary[];
+  /** Totals over `agents`. */
+  readonly repeatReads: number;
+  readonly handoffRereads: number;
 }
 
 export interface ICoverageReport {
   readonly sessionID: string;
+  readonly tracking: ESessionTracking;
   readonly files: readonly IFileCoverage[];
 }
 
@@ -129,4 +266,6 @@ export interface IFilePreview {
   readonly lines: readonly string[];
   /** The file has more lines than `lines` holds. */
   readonly truncated: boolean;
+  /** `lines` may differ from what the agent received: the file changed or was deleted, or the ranges are estimates. */
+  readonly contentMayDiffer: boolean;
 }

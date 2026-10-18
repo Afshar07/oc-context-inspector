@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { summarize } from "../src/coverage.js";
 import { describeFile, isLineRead, summaryLine, visibleFiles } from "../src/tui/format.js";
 import { type ICoverageClient, type ICoverageState, type IReadEvent, watchCoverage } from "../src/tui/source.js";
-import { EReadStatus, type ICoverageReport, type IContextReadRecord } from "../src/types.js";
+import { EReadStatus, ESessionTracking, type ICoverageReport, type IContextReadRecord } from "../src/types.js";
 
 const rec = (offset?: number, limit?: number, status = EReadStatus.Completed): IContextReadRecord => ({
   sessionID: "s",
@@ -19,9 +19,9 @@ const disk = { exists: true, lineCount: 120, mtimeMs: 0 };
 
 describe("describeFile", () => {
   it("names the read range, repeat count and staleness", () => {
-    expect(describeFile(summarize("a.md", [rec(10, 20)], disk, false))).toBe("L10–29/120");
-    expect(describeFile(summarize("a.md", [rec(1, 5), rec(50, 5)], disk, false))).toBe("10/120 lines · 2×");
-    expect(describeFile(summarize("a.md", [rec()], { ...disk, mtimeMs: Date.UTC(2027, 0) }, false))).toBe("changed");
+    expect(describeFile(summarize("a.md", [rec(10, 20)], disk, false))).toBe("~L10–29/120");
+    expect(describeFile(summarize("a.md", [rec(1, 5), rec(50, 5)], disk, false))).toBe("~10/120 lines · 2×");
+    expect(describeFile(summarize("a.md", [rec()], { ...disk, mtimeMs: Date.UTC(2027, 0) }, false))).toBe("~full · changed");
   });
 
   it("explains error and auto-loaded rows, and stays empty for plain unread", () => {
@@ -40,7 +40,7 @@ describe("summaryLine / isLineRead", () => {
       summarize("b.md", [], disk, false),
       summarize("gone.md", [rec(1, 1, EReadStatus.Error)], { exists: false, lineCount: 0 }, false),
     ];
-    expect(summaryLine({ sessionID: "s", files })).toBe("1/2 read");
+    expect(summaryLine({ sessionID: "s", tracking: ESessionTracking.Observed, files })).toBe("1/2 read");
     expect([9, 10, 29, 30].map((l) => isLineRead(l, [{ start: 10, end: 29 }]))).toEqual([false, true, true, false]);
   });
 });
@@ -77,7 +77,7 @@ describe("watchCoverage", () => {
     };
     return { client, handlers, pending, emit: (e: IReadEvent) => handlers.forEach((h) => h(e)) };
   }
-  const report = (n: number): ICoverageReport => ({ sessionID: `s${n}`, files: [] });
+  const report = (n: number): ICoverageReport => ({ sessionID: `s${n}`, tracking: ESessionTracking.Observed, files: [] });
 
   it("fetches immediately and once per burst of this session's read events", async () => {
     const fake = fakeClient();

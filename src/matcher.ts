@@ -60,6 +60,11 @@ export class ContextPathMatcher {
     return rel.split(path.sep).join("/");
   }
 
+  /** Absolute path of a project-relative one. */
+  resolve(relPath: string): string {
+    return path.resolve(this.root, relPath);
+  }
+
   /** Returns the matching pattern and normalized path, or undefined when not context. */
   match(filePath: string): { readonly relPath: string; readonly pattern: string } | undefined {
     const relPath = this.relativize(filePath);

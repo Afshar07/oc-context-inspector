@@ -11,13 +11,14 @@ describe("ContextInspectorRpc", () => {
 
   it("accepts what the coverage service produces", async () => {
     const { methods, events } = ContextInspectorRpc;
-    expect((await validate(methods.coverage.output, { sessionID: "s", files: [coverage] })).issues).toBeUndefined();
+    expect((await validate(methods.coverage.output, { sessionID: "s", tracking: "observed", files: [coverage] })).issues).toBeUndefined();
     expect(
-      (await validate(methods.preview.output, { found: true, preview: { coverage, lines: ["x"], truncated: false } }))
+      (await validate(methods.preview.output, { found: true, preview: { coverage, lines: ["x"], truncated: false, contentMayDiffer: false } }))
         .issues,
     ).toBeUndefined();
     expect((await validate(methods.preview.output, { found: false })).issues).toBeUndefined();
     expect((await validate(events.read.schema, { sessionID: "s", filePath: "a.md" })).issues).toBeUndefined();
+    expect((await validate(events.read.schema, { sessionID: "s", filePath: "a.md", ancestors: ["p"] })).issues).toBeUndefined();
   });
 
   it("rejects malformed input", async () => {

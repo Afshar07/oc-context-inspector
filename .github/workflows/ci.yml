@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The V2 CLI the plugin is tested against; keep in step with @opencode/plugin in package.json.
+  OPENCODE_CLI_VERSION: 2.0.32
+
+jobs:
+  check:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # `npm ci` installs exactly what package-lock.json pins and fails if it disagrees with package.json.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  e2e:
+    name: End-to-end (real OpenCode V2, scripted LLM)
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install OpenCode V2 CLI ${{ env.OPENCODE_CLI_VERSION }}
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/opencode" --no-audit --no-fund "@opencode/cli@${OPENCODE_CLI_VERSION}"
+          BIN="$RUNNER_TEMP/opencode/node_modules/.bin/opencode2"
+          ACTUAL="$("$BIN" --version)"
+          echo "installed: $ACTUAL"
+          case "$ACTUAL" in
+            *"$OPENCODE_CLI_VERSION"*) ;;
+            *) echo "::error::expected OpenCode $OPENCODE_CLI_VERSION, got: $ACTUAL"; exit 1 ;;
+          esac
+          echo "OPENCODE_BIN=$BIN" >> "$GITHUB_ENV"
+      - name: Run e2e
+        run: bash e2e/run.sh "$OPENCODE_BIN"
+      - name: Report e2e scope
+        if: always()
+        run: |
+          {
+            echo "### E2E scope"
+            echo "- Real OpenCode \`${OPENCODE_CLI_VERSION}\` on linux-x64 with this plugin; the LLM is a scripted local mock (no credentials)."
+            echo "- Not covered: the terminal UI (\`tui.ts\`) is exercised by unit tests only, and other operating systems."
+          } >> "$GITHUB_STEP_SUMMARY"

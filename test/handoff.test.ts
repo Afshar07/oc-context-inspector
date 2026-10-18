@@ -29,7 +29,7 @@ describe("handoffMessage", () => {
     expect(text).toContain("**Verdict**: fine");
     expect(text).toContain("p/m");
     expect(text).toMatch(/wait for the user's instructions/i);
-    expect(text).toContain("◐ .ai/a.md — L10–29/120");
+    expect(text).toContain("◐ .ai/a.md — ~L10–29/120");
     expect(text).toContain("○ .ai/b.md");
   });
 

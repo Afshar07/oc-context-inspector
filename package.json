@@ -11,7 +11,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "bash e2e/run.sh"
   },
   "dependencies": {
     "@opencode/plugin": "2.0.32"

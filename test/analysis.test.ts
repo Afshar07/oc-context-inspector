@@ -12,7 +12,7 @@ import {
 import { CoverageService, summarize } from "../src/coverage.js";
 import { ContextPathMatcher, DEFAULT_CONTEXT_PATHS } from "../src/matcher.js";
 import { JsonlContextReadStore } from "../src/store.js";
-import { EReadStatus, type IContextReadRecord } from "../src/types.js";
+import { EReadStatus, ESessionTracking, type IContextReadRecord, type ISessionObservation } from "../src/types.js";
 import { withTempDir } from "./helpers.js";
 
 const rec = (
@@ -31,6 +31,9 @@ const rec = (
   startedAt: "2026-01-01T00:00:00.000Z",
   completedAt: "2026-01-01T00:00:01.000Z",
 });
+
+const observed = (...ids: string[]): ISessionObservation[] =>
+  ids.map((sessionID) => ({ sessionID, tracking: ESessionTracking.Observed }));
 
 const DOC = ["intro", "# Overview", "a", "```", "# not a heading", "```", "## Data flow", "b", "# Deployment", "c"];
 
@@ -62,7 +65,7 @@ describe("aggregateUsage", () => {
       ["s2", [rec("s2", "a.md", { offset: 9 })]],
       ["s3", [rec("s3", "a.md", {}, EReadStatus.Error)]],
     ]);
-    const usage = aggregateUsage("a.md", { exists: true, lines: DOC }, bySession, 4);
+    const usage = aggregateUsage("a.md", { exists: true, lines: DOC }, bySession, observed("s1", "s2", "s3", "s4"));
     expect(usage).toMatchObject({ sessionsTotal: 4, sessionsRead: 2, reads: 3, errors: 1 });
     expect(usage.sections.map((s) => [s.title, s.sessionsRead])).toEqual([
       ["(before first heading)", 0],
@@ -109,8 +112,9 @@ describe("prompt builders", () => {
   });
 
   it("gives the project prompt usage ratios per file and section", () => {
-    const usage = aggregateUsage("a.md", { exists: true, lines: DOC }, new Map([["s1", [rec("s1", "a.md", { offset: 9 })]]]), 3);
-    const prompt = buildProjectPrompt({ sessionsTotal: 3, files: [{ usage, content: undefined }] });
+    const usage = aggregateUsage("a.md", { exists: true, lines: DOC }, new Map([["s1", [rec("s1", "a.md", { offset: 9 })]]]), observed("s1", "s2", "s3"));
+    const note = { total: 3, observed: 3, readsOnly: 0, lead: 0, subagent: 0 };
+    const prompt = buildProjectPrompt({ sessions: note, files: [{ usage, content: undefined }] });
     expect(prompt).toContain("3 recorded sessions");
     expect(prompt).toMatch(/a\.md.*read in 1\/3 sessions/);
     expect(prompt).toMatch(/# Deployment \(L9–10\): read in 1\/3 sessions/);
@@ -155,7 +159,7 @@ describe("AnalysisService", () => {
   it("reviews the project across every recorded session", () =>
     withTempDir(async (dir) => {
       const { service, prompts } = await setup(dir, true);
-      expect(await service.reviewProject()).toEqual({ text: "MODEL ANSWER", sessionCount: 2 });
+      expect(await service.reviewProject()).toEqual({ text: "MODEL ANSWER", sessionCount: 2, readsOnlySessions: 2 });
       expect(prompts[0]).toContain("2 recorded sessions");
       expect(prompts[0]).toMatch(/\.ai\/doc\.md.*read in 1\/2 sessions/);
       expect(prompts[0]).toContain("# not a heading");

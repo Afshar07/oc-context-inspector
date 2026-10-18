@@ -85,7 +85,8 @@ export function Analysis(props: IAnalysisProps) {
         {(() => {
           const r = result();
           const model = r?.ok ? `${r.model} · ` : "";
-          const sessions = r?.ok && r.sessionCount !== undefined ? `${r.sessionCount} sessions · ` : "";
+          const legacy = r?.ok && r.readsOnlySessions ? ` (${r.readsOnlySessions} older, reads only)` : "";
+          const sessions = r?.ok && r.sessionCount !== undefined ? `${r.sessionCount} sessions${legacy} · ` : "";
           if (continuing()) return "Opening a session…";
           const next = r?.ok ? "n continue in session · " : "";
           return `${model}${sessions}${next}r rerun · esc close`;

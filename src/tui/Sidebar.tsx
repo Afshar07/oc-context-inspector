@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { Plugin } from "@opencode/plugin/tui";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
-import { describeFile, STATUS_GLYPH, summaryLine, visibleFiles } from "./format.js";
+import { describeFile, STATUS_GLYPH, summaryLine, trackingNote, visibleFiles } from "./format.js";
 import type { ICoverageClient, ICoverageState } from "./source.js";
 import { watchCoverage } from "./source.js";
 import { statusColor } from "./theme.js";
@@ -33,6 +33,9 @@ export function Sidebar(props: ISidebarProps) {
           <b>Context files</b>
         </text>
         <Show when={state().report}>{(report) => <text fg={theme.text.muted}>{summaryLine(report())}</text>}</Show>
+        <Show when={state().report && trackingNote(state().report!)}>
+          {(note) => <text fg={theme.text.faint}>{note()}</text>}
+        </Show>
         <Show when={state().error}>{(error) => <text fg={theme.text.feedback.error.base}>{error()}</text>}</Show>
         <For each={files()}>
           {(file, index) => (
