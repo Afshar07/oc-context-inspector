@@ -1,6 +1,6 @@
 import { type CoverageService, mergeRanges, readRange } from "./coverage.js";
 import { listSessionIDs, readSessionRecords } from "./store.js";
-import { EReadStatus, type IContextReadRecord, type IFileCoverage, type ILineRange } from "./types.js";
+import { EReadStatus, type IContextReadRecord, type IFileCoverage, type ILineRange, type IModelRef } from "./types.js";
 
 const MAX_TASK_CHARS = 4_000;
 const MAX_FILE_CONTENT_CHARS = 8_000;
@@ -29,8 +29,8 @@ export interface IFileUsage {
   readonly sections: readonly (ISection & { readonly sessionsRead: number })[];
 }
 
-/** Sends a prompt to a model and returns its text answer. */
-export type Generate = (prompt: string) => Promise<string>;
+/** Sends a prompt to a model (the caller's choice; OpenCode's default when absent) and returns its answer. */
+export type Generate = (prompt: string, model: IModelRef | undefined) => Promise<string>;
 
 /** Markdown ATX headings, ignoring fenced code blocks. Lines are 1-based. */
 export function extractOutline(lines: readonly string[]): IHeading[] {
@@ -187,7 +187,7 @@ export class AnalysisService {
     private readonly options: { readonly includeContent: boolean },
   ) {}
 
-  async analyzeSession(sessionID: string, task: readonly string[]): Promise<string> {
+  async analyzeSession(sessionID: string, task: readonly string[], model?: IModelRef): Promise<string> {
     const report = await this.coverage.coverage(sessionID);
     if (report.files.length === 0) return "No context files in this project; nothing to analyze.";
     const content = contentBudget();
@@ -201,10 +201,10 @@ export class AnalysisService {
         };
       }),
     );
-    return this.generate(buildSessionPrompt({ task, files }));
+    return this.generate(buildSessionPrompt({ task, files }), model);
   }
 
-  async reviewProject(): Promise<{ text: string; sessionCount: number }> {
+  async reviewProject(model?: IModelRef): Promise<{ text: string; sessionCount: number }> {
     const sessionIDs = await listSessionIDs(this.dataDir);
     // file -> session -> records
     const usage = new Map<string, Map<string, IContextReadRecord[]>>();
@@ -230,7 +230,7 @@ export class AnalysisService {
         };
       }),
     );
-    const text = await this.generate(buildProjectPrompt({ sessionsTotal: sessionIDs.length, files }));
+    const text = await this.generate(buildProjectPrompt({ sessionsTotal: sessionIDs.length, files }), model);
     return { text, sessionCount: sessionIDs.length };
   }
 }

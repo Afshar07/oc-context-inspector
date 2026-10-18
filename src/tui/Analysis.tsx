@@ -2,6 +2,7 @@
 import type { Plugin } from "@opencode/plugin/tui";
 import type { PanelInput } from "@opencode/plugin/tui/context";
 import { createResource, createSignal, Match, Switch } from "solid-js";
+import { AnswerMarkdown } from "./AnswerMarkdown.js";
 import type { ICoverageClient } from "./source.js";
 
 export type EAnalysisMode = "session" | "project";
@@ -53,9 +54,7 @@ export function Analysis(props: IAnalysisProps) {
             {(r) => {
               const answer = r();
               return answer.ok ? (
-                <text wrapMode="word" fg={theme.text.base}>
-                  {answer.text}
-                </text>
+                <AnswerMarkdown text={answer.text} theme={theme} />
               ) : (
                 <text wrapMode="word" fg={theme.text.feedback.error.base}>
                   Analysis failed: {answer.error}
@@ -68,8 +67,9 @@ export function Analysis(props: IAnalysisProps) {
       <text flexShrink={0} fg={theme.text.faint}>
         {(() => {
           const r = result();
+          const model = r?.ok ? `${r.model} · ` : "";
           const sessions = r?.ok && r.sessionCount !== undefined ? `${r.sessionCount} sessions · ` : "";
-          return `${sessions}r rerun · esc close`;
+          return `${model}${sessions}r rerun · esc close`;
         })()}
       </text>
     </box>

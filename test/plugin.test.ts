@@ -24,6 +24,7 @@ function fakeContext(
     options,
     location: { directory },
     generate: { text: generate },
+    model: { default: async () => ({ data: { providerID: "cfg", id: "default-model" } }) },
     tool: {
       hook: async (name: string, cb: Hook) => {
         hooks[name] = cb;
@@ -122,10 +123,31 @@ describe("plugin RPC analysis", () => {
         return { text: "looks fine" };
       });
       await plugin.setup(ctx);
-      expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: ["ship it"] })).toEqual({ ok: true, text: "looks fine" });
+      expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: ["ship it"] })).toEqual({
+        ok: true,
+        text: "looks fine",
+        model: "anthropic/claude-x#high",
+      });
       expect(calls[0]!.prompt).toContain("ship it");
       expect(calls[0]!.model).toEqual({ providerID: "anthropic", id: "claude-x", variant: "high" });
-      expect(await rpc.handlers.reviewProject!({})).toEqual({ ok: true, text: "looks fine", sessionCount: 0 });
+      expect(await rpc.handlers.reviewProject!({})).toEqual({
+        ok: true,
+        text: "looks fine",
+        sessionCount: 0,
+        model: "anthropic/claude-x#high",
+      });
+    }));
+
+  it("without analysis.model, runs OpenCode's default model explicitly and names it", () =>
+    withTempDir(async (dir) => {
+      await writeFile(`${dir}/AGENTS.md`, "# Agents");
+      const calls: { model?: unknown }[] = [];
+      const { ctx, rpc } = fakeContext(dir, {}, true, async (input) => (calls.push(input), { text: "ok" }));
+      await plugin.setup(ctx);
+      expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: [] })).toMatchObject({
+        model: "cfg/default-model",
+      });
+      expect(calls[0]!.model).toEqual({ providerID: "cfg", id: "default-model" });
     }));
 
   it("reports model failures as data instead of throwing", () =>

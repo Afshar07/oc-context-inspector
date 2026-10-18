@@ -50,14 +50,16 @@ export const ContextInspectorRpc = Rpc.define({
     /** Model review of one session's reads; `task` is the user's messages, for relevance. */
     analyzeSession: {
       input: portable(Schema.Struct({ sessionID: Schema.String, task: Schema.Array(Schema.String) })),
-      output: portable(Schema.Union([Schema.Struct({ ok: Schema.Literal(true), text: Schema.String }), Failure])),
+      output: portable(
+        Schema.Union([Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, model: Schema.String }), Failure]),
+      ),
     },
     /** Model review of how every recorded session used the project's context files. */
     reviewProject: {
       input: portable(Schema.Struct({})),
       output: portable(
         Schema.Union([
-          Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, sessionCount: Schema.Number }),
+          Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, sessionCount: Schema.Number, model: Schema.String }),
           Failure,
         ]),
       ),

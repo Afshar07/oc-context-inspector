@@ -47,7 +47,20 @@ export function resolveOptions(
 
 const failure = (error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) });
 
-function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: AnalysisService) {
+const modelLabel = (m: IModelRef) => `${m.providerID}/${m.id}${m.variant ? `#${m.variant}` : ""}`;
+
+function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: AnalysisService, configured?: IModelRef) {
+  // Resolved per call and passed explicitly, so the label shown is the model that actually ran.
+  const resolveModel = async (): Promise<IModelRef | undefined> => {
+    if (configured) return configured;
+    const fallback = await ctx.model.default().catch(() => undefined);
+    return fallback?.data ? { providerID: fallback.data.providerID, id: fallback.data.id } : undefined;
+  };
+  const withModel = async <T extends object>(run: (model: IModelRef | undefined) => Promise<T>) => {
+    const model = await resolveModel();
+    return { ok: true as const, ...(await run(model)), model: model ? modelLabel(model) : "OpenCode default" };
+  };
+
   return ctx.rpc.register(ContextInspectorRpc, {
     coverage: ({ sessionID }) => coverage.coverage(sessionID),
     preview: async ({ sessionID, filePath }) => {
@@ -56,8 +69,8 @@ function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: A
     },
     // Model failures (no provider, rate limits) are answers for the TUI to show, not RPC faults.
     analyzeSession: ({ sessionID, task }) =>
-      analysis.analyzeSession(sessionID, task).then((text) => ({ ok: true as const, text }), failure),
-    reviewProject: () => analysis.reviewProject().then((r) => ({ ok: true as const, ...r }), failure),
+      withModel(async (model) => ({ text: await analysis.analyzeSession(sessionID, task, model) })).catch(failure),
+    reviewProject: () => withModel((model) => analysis.reviewProject(model)).catch(failure),
   });
 }
 
@@ -67,18 +80,18 @@ export default Plugin.define({
     const options = resolveOptions(ctx.options, ctx.location.directory);
     const matcher = new ContextPathMatcher(ctx.location.directory, options.contextPaths);
     const coverage = new CoverageService(ctx.location.directory, matcher, options);
-    const { model, includeContent } = options.analysis;
+    const { includeContent } = options.analysis;
     const analysis = new AnalysisService(
       coverage,
       options.dataDir,
-      async (prompt) => (await ctx.generate.text({ prompt, ...(model && { model }) })).text,
+      async (prompt, model) => (await ctx.generate.text({ prompt, ...(model && { model }) })).text,
       { includeContent },
     );
 
     // Serves the TUI sidebar. Recording must keep working if RPC is unavailable.
     let rpc: Awaited<ReturnType<typeof registerRpc>> | undefined;
     try {
-      rpc = await registerRpc(ctx, coverage, analysis);
+      rpc = await registerRpc(ctx, coverage, analysis, options.analysis.model);
     } catch {}
 
     const jsonl = new JsonlContextReadStore(options.dataDir);

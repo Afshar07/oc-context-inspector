@@ -72,7 +72,10 @@ export default Plugin.define({
       ctx.ui.slot({
         append: "app",
         render: () => {
+          // "global", like OpenCode's own /btw and /diff: base-mode commands are reachable but
+          // never offered by the prompt's slash completion.
           ctx.keymap.layer(() => ({
+            mode: "global",
             commands: [
               {
                 id: "context-inspector.files",

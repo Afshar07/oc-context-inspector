@@ -7,7 +7,7 @@ export interface IReadEvent {
 
 /** A model's answer, or why there is none (no provider, rate limit, ...). */
 export type IAnalysisResult =
-  | { readonly ok: true; readonly text: string; readonly sessionCount?: number }
+  | { readonly ok: true; readonly text: string; readonly model: string; readonly sessionCount?: number }
   | { readonly ok: false; readonly error: string };
 
 /** What the TUI needs from the server; the RPC adapter is the only implementation. */

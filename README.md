@@ -59,7 +59,8 @@ File contents are read on demand for display and never written anywhere.
 ## Model analysis
 
 Two commands ask a model to interpret the recorded reads. The answer opens in the session panel
-(`r` reruns, `esc` closes). Both use `ctx.generate.text`, so they run outside the conversation and do not change it.
+(`r` reruns, `esc` closes) and its footer names the model that ran. Both use `ctx.generate.text`, so they run outside
+the conversation and do not change it.
 
 * `/context-analyze`: **this session.** Did the agent read the context its task needed, what did it skip, and which
   reads look irrelevant? The task is the session's user messages.
@@ -111,7 +112,8 @@ e2e/run.sh /path/to/opencode2     # two concurrent real OpenCode sessions (see b
   the `changed` marker flags this.
 * OpenCode compiles `.tsx` with its Solid transform only outside `node_modules`, so the TUI half works as a local
   directory plugin. Publishing it as an npm package would need the TUI precompiled first.
-* Analysis answers are shown as plain wrapped text; the model's Markdown is not rendered.
+* Analysis answers render a Markdown subset (headings, lists, bold, italic, code). OpenTUI's own `<markdown>` needs
+  `@opentui/core`, which OpenCode does not provide to plugins; importing it loads a second copy and the TUI half fails.
 * Section outlines come from Markdown `#` headings. A file without headings is one section, so analysis can only say
   which line ranges of it were read.
 * Not implemented: an agent-facing tool that lets the agent query its own context coverage. It would change agent
