@@ -1,14 +1,19 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import plugin, { readSessionRecords, resolveOptions } from "../src/index.js";
+import plugin, { parseModelRef, readSessionRecords, resolveOptions } from "../src/index.js";
 import { ECoverageStatus, type ICoverageReport } from "../src/types.js";
 import { withTempDir } from "./helpers.js";
 
 type Hook = (event: Record<string, unknown>) => unknown;
 
 /** Minimal stand-in for the V2 plugin context: just enough to capture tool hooks. */
-function fakeContext(directory: string, options: Record<string, unknown> = {}, withRpc = false) {
+function fakeContext(
+  directory: string,
+  options: Record<string, unknown> = {},
+  withRpc = false,
+  generate: (input: { prompt: string; model?: unknown }) => Promise<{ text: string }> = async () => ({ text: "" }),
+) {
   const hooks: Record<string, Hook> = {};
   const rpc = {
     id: undefined as string | undefined,
@@ -18,6 +23,7 @@ function fakeContext(directory: string, options: Record<string, unknown> = {}, w
   const ctx = {
     options,
     location: { directory },
+    generate: { text: generate },
     tool: {
       hook: async (name: string, cb: Hook) => {
         hooks[name] = cb;
@@ -106,6 +112,45 @@ describe("plugin RPC", () => {
     }));
 });
 
+describe("plugin RPC analysis", () => {
+  it("sends the prompt to the configured model and returns its answer", () =>
+    withTempDir(async (dir) => {
+      await writeFile(`${dir}/AGENTS.md`, "# Agents");
+      const calls: { prompt: string; model?: unknown }[] = [];
+      const { ctx, rpc } = fakeContext(dir, { analysis: { model: "anthropic/claude-x#high" } }, true, async (input) => {
+        calls.push(input);
+        return { text: "looks fine" };
+      });
+      await plugin.setup(ctx);
+      expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: ["ship it"] })).toEqual({ ok: true, text: "looks fine" });
+      expect(calls[0]!.prompt).toContain("ship it");
+      expect(calls[0]!.model).toEqual({ providerID: "anthropic", id: "claude-x", variant: "high" });
+      expect(await rpc.handlers.reviewProject!({})).toEqual({ ok: true, text: "looks fine", sessionCount: 0 });
+    }));
+
+  it("reports model failures as data instead of throwing", () =>
+    withTempDir(async (dir) => {
+      await writeFile(`${dir}/AGENTS.md`, "# Agents");
+      const { ctx, rpc } = fakeContext(dir, {}, true, async () => {
+        throw new Error("no provider configured");
+      });
+      await plugin.setup(ctx);
+      expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: [] })).toEqual({
+        ok: false,
+        error: "no provider configured",
+      });
+    }));
+});
+
+describe("parseModelRef", () => {
+  it("parses provider/model and an optional variant", () => {
+    expect(parseModelRef("openai/gpt-x")).toEqual({ providerID: "openai", id: "gpt-x" });
+    expect(parseModelRef("p/org/model#v")).toEqual({ providerID: "p", id: "org/model", variant: "v" });
+    expect(parseModelRef("no-slash")).toBeUndefined();
+    expect(parseModelRef(3)).toBeUndefined();
+  });
+});
+
 describe("resolveOptions", () => {
   it("applies defaults and rejects malformed values", () => {
     const o = resolveOptions({ contextPaths: [1], tools: "read" }, "/p");
@@ -113,5 +158,6 @@ describe("resolveOptions", () => {
     expect(o.tools).toEqual(["read"]);
     expect(o.dataDir).toBe(path.resolve("/p", ".opencode/context-inspector"));
     expect(o.autoLoaded).toEqual(["AGENTS.md"]);
+    expect(o.analysis).toEqual({ includeContent: false });
   });
 });

@@ -30,6 +30,8 @@ const FilePreview = Schema.Struct({
   truncated: Schema.Boolean,
 });
 
+const Failure = Schema.Struct({ ok: Schema.Literal(false), error: Schema.String });
+
 // Compile-time guard that the wire schemas and the domain types stay in step.
 const sameShape = <A, B extends A>(_: (a: A) => B) => {};
 sameShape<ICoverageReport, (typeof CoverageReport)["Type"]>((a) => a);
@@ -44,6 +46,21 @@ export const ContextInspectorRpc = Rpc.define({
     coverage: {
       input: portable(Schema.Struct({ sessionID: Schema.String })),
       output: portable(CoverageReport),
+    },
+    /** Model review of one session's reads; `task` is the user's messages, for relevance. */
+    analyzeSession: {
+      input: portable(Schema.Struct({ sessionID: Schema.String, task: Schema.Array(Schema.String) })),
+      output: portable(Schema.Union([Schema.Struct({ ok: Schema.Literal(true), text: Schema.String }), Failure])),
+    },
+    /** Model review of how every recorded session used the project's context files. */
+    reviewProject: {
+      input: portable(Schema.Struct({})),
+      output: portable(
+        Schema.Union([
+          Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, sessionCount: Schema.Number }),
+          Failure,
+        ]),
+      ),
     },
     /** `found: false` when the path is not a context file of the project. */
     preview: {

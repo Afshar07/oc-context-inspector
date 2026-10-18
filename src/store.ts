@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import * as path from "node:path";
 import type { IContextReadRecord, IContextReadStore } from "./types.js";
 
@@ -32,4 +32,16 @@ export async function readSessionRecords(
     .split("\n")
     .filter((line) => line !== "")
     .map((line) => JSON.parse(line) as IContextReadRecord);
+}
+
+/** IDs (file stems) of every session with records in `dataDir`. */
+export async function listSessionIDs(dataDir: string): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(dataDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  return names.filter((n) => n.endsWith(".jsonl")).map((n) => n.slice(0, -".jsonl".length));
 }

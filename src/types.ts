@@ -40,6 +40,21 @@ export interface IContextInspectorOptions {
   readonly dataDir: string;
   /** Project-relative files OpenCode injects into the prompt on its own (shown as auto-loaded, not unread). */
   readonly autoLoaded: readonly string[];
+  readonly analysis: IAnalysisOptions;
+}
+
+/** `analysis` plugin option: how context-usage data is sent to a model. */
+export interface IAnalysisOptions {
+  /** Model for analysis; the user's default model when absent. */
+  readonly model?: IModelRef;
+  /** Send file contents, not just heading outlines. Off by default: unread files would reach the provider. */
+  readonly includeContent: boolean;
+}
+
+export interface IModelRef {
+  readonly providerID: string;
+  readonly id: string;
+  readonly variant?: string;
 }
 
 /** The subset of the V2 `tool.hook("execute.before")` event the tracker reads. */

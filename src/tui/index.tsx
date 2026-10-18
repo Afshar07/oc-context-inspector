@@ -1,7 +1,8 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui";
-import { createSignal, Show } from "solid-js";
+import { createSignal, Match, Show, Switch } from "solid-js";
 import type { IFileCoverage } from "../types.js";
+import { Analysis, type EAnalysisMode } from "./Analysis.js";
 import { rpcCoverageClient } from "./client.js";
 import { describeFile, STATUS_GLYPH, visibleFiles } from "./format.js";
 import { Preview } from "./Preview.js";
@@ -9,6 +10,10 @@ import { Sidebar } from "./Sidebar.js";
 import type { ICoverageClient } from "./source.js";
 
 const PANEL_NAME = "context-inspector.preview";
+const ANALYSIS_PANELS: Readonly<Record<EAnalysisMode, string>> = {
+  session: "context-inspector.analysis.session",
+  project: "context-inspector.analysis.project",
+};
 /** Keymap mode while the sidebar list is browsed with the keyboard; other layers are inactive. */
 const BROWSE_MODE = "context-inspector.browse";
 
@@ -24,6 +29,9 @@ export default Plugin.define({
     const openPreview = (filePath: string) => {
       setSelected(filePath);
       if (!ctx.ui.panel.open(PANEL_NAME)) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
+    };
+    const openAnalysis = (mode: EAnalysisMode) => {
+      if (!ctx.ui.panel.open(ANALYSIS_PANELS[mode])) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
     };
     const currentSession = () => {
       const route = ctx.ui.router.current();
@@ -47,9 +55,17 @@ export default Plugin.define({
       ctx.ui.slot({
         append: "session.panel",
         render: (input) => (
-          <Show when={input.name === PANEL_NAME && selected()}>
-            {(filePath) => <Preview ctx={ctx} client={client} panel={input} filePath={filePath()} />}
-          </Show>
+          <Switch>
+            <Match when={input.name === PANEL_NAME && selected()}>
+              {(filePath) => <Preview ctx={ctx} client={client} panel={input} filePath={filePath()} />}
+            </Match>
+            <Match when={input.name === ANALYSIS_PANELS.session}>
+              <Analysis ctx={ctx} client={client} panel={input} mode="session" />
+            </Match>
+            <Match when={input.name === ANALYSIS_PANELS.project}>
+              <Analysis ctx={ctx} client={client} panel={input} mode="project" />
+            </Match>
+          </Switch>
         ),
       }),
       // Layers live inside a mounted component, like OpenCode's own plugins register theirs.
@@ -72,6 +88,26 @@ export default Plugin.define({
                   const filePath = await pickFile(ctx, client, sessionID);
                   if (filePath) openPreview(filePath);
                 },
+              },
+              {
+                id: "context-inspector.analyze",
+                title: "Analyze this session's context reads",
+                description: "Ask a model whether the agent read the context this task needed",
+                group: "Session",
+                palette: true,
+                slash: { name: "context-analyze" },
+                enabled: () => currentSession() !== undefined,
+                run: () => openAnalysis("session"),
+              },
+              {
+                id: "context-inspector.review",
+                title: "Review context files across sessions",
+                description: "Ask a model how agents use the project's context files, and what to change",
+                group: "Session",
+                palette: true,
+                slash: { name: "context-review" },
+                enabled: () => currentSession() !== undefined,
+                run: () => openAnalysis("project"),
               },
               {
                 id: "context-inspector.toggle-unread",

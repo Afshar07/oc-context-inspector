@@ -68,6 +68,8 @@ describe("watchCoverage", () => {
     const client: ICoverageClient = {
       coverage: () => new Promise((resolve) => pending.push(resolve)),
       preview: async () => undefined,
+      analyzeSession: async () => ({ ok: true, text: "" }),
+      reviewProject: async () => ({ ok: true, text: "" }),
       onRead: (h) => {
         handlers.push(h);
         return () => handlers.splice(handlers.indexOf(h), 1);

@@ -90,7 +90,7 @@ function splitLines(text: string): string[] {
 }
 
 /** Reads a file's lines; undefined when it is not a readable regular file. */
-async function loadFile(abs: string): Promise<{ lines: string[]; mtimeMs: number } | undefined> {
+export async function loadFile(abs: string): Promise<{ lines: string[]; mtimeMs: number } | undefined> {
   try {
     const info = await stat(abs);
     if (!info.isFile()) return undefined;
@@ -137,6 +137,11 @@ export class CoverageService {
     };
   }
 
+  /** Current lines of a project-relative file; undefined when it is not a readable file. */
+  async readLines(filePath: string): Promise<string[] | undefined> {
+    return (await loadFile(path.join(this.root, filePath)))?.lines;
+  }
+
   private summarizeFile(
     filePath: string,
     records: readonly IContextReadRecord[],
@@ -159,7 +164,7 @@ export class CoverageService {
   }
 
   /** Project-relative paths of context files on disk, skipping VCS, dependencies and our own data. */
-  private async listContextFiles(): Promise<string[]> {
+  async listContextFiles(): Promise<string[]> {
     const found: string[] = [];
     const walk = async (dir: string): Promise<void> => {
       let entries: Dirent[];

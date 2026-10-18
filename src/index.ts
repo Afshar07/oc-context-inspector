@@ -1,11 +1,12 @@
 import { Plugin } from "@opencode/plugin";
 import * as path from "node:path";
+import { AnalysisService } from "./analysis.js";
 import { CoverageService } from "./coverage.js";
 import { ContextPathMatcher, DEFAULT_CONTEXT_PATHS } from "./matcher.js";
 import { ContextInspectorRpc } from "./rpc.js";
 import { JsonlContextReadStore } from "./store.js";
 import { ContextReadTracker } from "./tracker.js";
-import type { IContextInspectorOptions, IContextReadStore } from "./types.js";
+import type { IContextInspectorOptions, IContextReadStore, IModelRef } from "./types.js";
 
 export { ContextPathMatcher, ContextReadTracker, CoverageService, JsonlContextReadStore };
 export { ContextInspectorRpc } from "./rpc.js";
@@ -18,6 +19,14 @@ function stringList(value: unknown, fallback: readonly string[]): readonly strin
     : fallback;
 }
 
+/** `provider/model` or `provider/model#variant`, as OpenCode writes model IDs. */
+export function parseModelRef(value: unknown): IModelRef | undefined {
+  if (typeof value !== "string") return undefined;
+  const match = /^([^/#]+)\/([^#]+)(?:#(.+))?$/.exec(value);
+  if (!match) return undefined;
+  return { providerID: match[1]!, id: match[2]!, ...(match[3] !== undefined && { variant: match[3] }) };
+}
+
 export function resolveOptions(
   raw: Readonly<Record<string, unknown>>,
   directory: string,
@@ -28,16 +37,27 @@ export function resolveOptions(
     tools: stringList(raw.tools, ["read"]),
     dataDir: path.resolve(directory, dataDir),
     autoLoaded: stringList(raw.autoLoaded, ["AGENTS.md"]),
+    analysis: (() => {
+      const a = (typeof raw.analysis === "object" && raw.analysis !== null ? raw.analysis : {}) as Record<string, unknown>;
+      const model = parseModelRef(a.model);
+      return { ...(model && { model }), includeContent: a.includeContent === true };
+    })(),
   };
 }
 
-function registerRpc(ctx: Plugin.Context, coverage: CoverageService) {
+const failure = (error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) });
+
+function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: AnalysisService) {
   return ctx.rpc.register(ContextInspectorRpc, {
     coverage: ({ sessionID }) => coverage.coverage(sessionID),
     preview: async ({ sessionID, filePath }) => {
       const preview = await coverage.preview(sessionID, filePath);
       return preview ? { found: true as const, preview } : { found: false as const };
     },
+    // Model failures (no provider, rate limits) are answers for the TUI to show, not RPC faults.
+    analyzeSession: ({ sessionID, task }) =>
+      analysis.analyzeSession(sessionID, task).then((text) => ({ ok: true as const, text }), failure),
+    reviewProject: () => analysis.reviewProject().then((r) => ({ ok: true as const, ...r }), failure),
   });
 }
 
@@ -47,11 +67,18 @@ export default Plugin.define({
     const options = resolveOptions(ctx.options, ctx.location.directory);
     const matcher = new ContextPathMatcher(ctx.location.directory, options.contextPaths);
     const coverage = new CoverageService(ctx.location.directory, matcher, options);
+    const { model, includeContent } = options.analysis;
+    const analysis = new AnalysisService(
+      coverage,
+      options.dataDir,
+      async (prompt) => (await ctx.generate.text({ prompt, ...(model && { model }) })).text,
+      { includeContent },
+    );
 
     // Serves the TUI sidebar. Recording must keep working if RPC is unavailable.
     let rpc: Awaited<ReturnType<typeof registerRpc>> | undefined;
     try {
-      rpc = await registerRpc(ctx, coverage);
+      rpc = await registerRpc(ctx, coverage, analysis);
     } catch {}
 
     const jsonl = new JsonlContextReadStore(options.dataDir);

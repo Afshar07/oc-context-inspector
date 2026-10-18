@@ -2,6 +2,14 @@ import type { Plugin } from "@opencode/plugin/tui";
 import { ContextInspectorRpc } from "../rpc.js";
 import type { ICoverageClient } from "./source.js";
 
+/** The session's user messages: the task the analysis judges relevance against. */
+async function userPrompts(ctx: Plugin.Context, sessionID: string): Promise<string[]> {
+  await ctx.data.session.message.sync(sessionID).catch(() => {});
+  return ctx.data.session.message
+    .list(sessionID)
+    .flatMap((message) => (message.type === "user" && message.text.trim() !== "" ? [message.text] : []));
+}
+
 /** Calls the server half over RPC, routed to the server instance that owns the session's project. */
 export function rpcCoverageClient(ctx: Plugin.Context): ICoverageClient {
   const rpc = ctx.client.rpc(ContextInspectorRpc);
@@ -16,5 +24,8 @@ export function rpcCoverageClient(ctx: Plugin.Context): ICoverageClient {
       return result.found ? result.preview : undefined;
     },
     onRead: (handler) => rpc.events.on("read", (event) => handler(event.data)),
+    analyzeSession: async (sessionID) =>
+      rpc.analyzeSession({ sessionID, task: await userPrompts(ctx, sessionID) }, routed(sessionID)),
+    reviewProject: (sessionID) => rpc.reviewProject({}, routed(sessionID)),
   };
 }

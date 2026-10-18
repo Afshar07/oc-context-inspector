@@ -5,12 +5,21 @@ export interface IReadEvent {
   readonly filePath: string;
 }
 
+/** A model's answer, or why there is none (no provider, rate limit, ...). */
+export type IAnalysisResult =
+  | { readonly ok: true; readonly text: string; readonly sessionCount?: number }
+  | { readonly ok: false; readonly error: string };
+
 /** What the TUI needs from the server; the RPC adapter is the only implementation. */
 export interface ICoverageClient {
   coverage(sessionID: string): Promise<ICoverageReport>;
   /** Undefined when the path is not a context file. */
   preview(sessionID: string, filePath: string): Promise<IFilePreview | undefined>;
   onRead(handler: (event: IReadEvent) => void): () => void;
+  /** Did this session read the context its task needed? */
+  analyzeSession(sessionID: string): Promise<IAnalysisResult>;
+  /** How all recorded sessions used the project's context files; `sessionID` only routes to the project. */
+  reviewProject(sessionID: string): Promise<IAnalysisResult>;
 }
 
 export interface ICoverageState {

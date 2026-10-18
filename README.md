@@ -56,6 +56,21 @@ File contents are read on demand for display and never written anywhere.
 * `/context` (also in the command palette): pick from a list of all context files, unread included;
 * `/context-browse`: select in the sidebar with `↑`/`↓` (or `k`/`j`), `enter` to preview, `esc` to stop.
 
+## Model analysis
+
+Two commands ask a model to interpret the recorded reads. The answer opens in the session panel
+(`r` reruns, `esc` closes). Both use `ctx.generate.text`, so they run outside the conversation and do not change it.
+
+* `/context-analyze`: **this session.** Did the agent read the context its task needed, what did it skip, and which
+  reads look irrelevant? The task is the session's user messages.
+* `/context-review`: **all recorded sessions in the project.** Which files or sections are never or rarely read, which
+  are only partly read (candidates to split or trim), and a short list of concrete edits.
+
+What is sent to the model: read metadata (status, line ranges, counts; per section, whether it was fully, partly or
+not read, or in how many sessions) plus each context file's **outline**: its Markdown headings with line numbers.
+File bodies are **not** sent unless `analysis.includeContent` is on. With it on, unread files reach the model provider
+even though the agent never read them; contents are capped at 8,000 characters per file and 40,000 in total.
+
 ## Options
 
 | option | default | meaning |
@@ -64,6 +79,8 @@ File contents are read on demand for display and never written anywhere.
 | `tools` | `["read"]` | tools to inspect |
 | `dataDir` | `.opencode/context-inspector` | output directory (relative to the project) |
 | `autoLoaded` | `["AGENTS.md"]` | project-relative files OpenCode injects on its own; shown as `◌` instead of unread |
+| `analysis.model` | your default model | model for `/context-analyze` and `/context-review`, as `provider/model` or `provider/model#variant` |
+| `analysis.includeContent` | `false` | also send file contents to the model, not just heading outlines |
 
 ## Install
 
@@ -94,7 +111,11 @@ e2e/run.sh /path/to/opencode2     # two concurrent real OpenCode sessions (see b
   the `changed` marker flags this.
 * OpenCode compiles `.tsx` with its Solid transform only outside `node_modules`, so the TUI half works as a local
   directory plugin. Publishing it as an npm package would need the TUI precompiled first.
-* Not implemented (by design for this PoC): suggestions, AI analysis.
+* Analysis answers are shown as plain wrapped text; the model's Markdown is not rendered.
+* Section outlines come from Markdown `#` headings. A file without headings is one section, so analysis can only say
+  which line ranges of it were read.
+* Not implemented: an agent-facing tool that lets the agent query its own context coverage. It would change agent
+  behaviour, and this plugin otherwise only observes.
 
 ## E2E demonstration
 
