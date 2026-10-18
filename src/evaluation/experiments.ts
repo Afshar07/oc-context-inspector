@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { ContextPathMatcher } from "../matcher.js";
 import type { IClock } from "../types.js";
 import type { GroupResolver } from "./groups.js";
-import { diffSnapshots, diffPaths, excludeDiff, isEmptyDiff, restrictDiff, scopedRevisionId, type RevisionSnapshotter } from "./revisions.js";
+import { diffSnapshots, diffPaths, excludeDiff, isEmptyDiff, restrictDiff, scopedRevisionId, toPosix, type RevisionSnapshotter } from "./revisions.js";
 import type { EvaluationStore } from "./store.js";
 import {
   EAdherence,
@@ -328,7 +328,8 @@ export class ExperimentService {
   }
 
   private normalizeTarget(file: string): string {
-    const match = this.deps.matcher.match(file);
+    // Accept Windows separators on any platform; path.resolve only treats `\` as one on win32.
+    const match = this.deps.matcher.match(toPosix(file));
     if (!match) throw new ExperimentError(`${file} is not a context file of this project.`);
     return match.relPath;
   }
