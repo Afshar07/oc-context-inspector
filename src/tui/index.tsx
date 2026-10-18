@@ -1,0 +1,185 @@
+/** @jsxImportSource @opentui/solid */
+import { Plugin } from "@opencode/plugin/tui";
+import { createSignal, Show } from "solid-js";
+import type { IFileCoverage } from "../types.js";
+import { rpcCoverageClient } from "./client.js";
+import { describeFile, STATUS_GLYPH, visibleFiles } from "./format.js";
+import { Preview } from "./Preview.js";
+import { Sidebar } from "./Sidebar.js";
+import type { ICoverageClient } from "./source.js";
+
+const PANEL_NAME = "context-inspector.preview";
+/** Keymap mode while the sidebar list is browsed with the keyboard; other layers are inactive. */
+const BROWSE_MODE = "context-inspector.browse";
+
+export default Plugin.define({
+  id: "opencode-context-inspector",
+  setup(ctx) {
+    const client = rpcCoverageClient(ctx);
+    const [selected, setSelected] = createSignal<string>();
+    // Durable, so the choice survives TUI restarts.
+    const [prefs, setPrefs] = ctx.storage.store("prefs", { initial: { showUnread: false } });
+    const browse = createBrowseState(ctx, client, () => prefs.showUnread);
+
+    const openPreview = (filePath: string) => {
+      setSelected(filePath);
+      if (!ctx.ui.panel.open(PANEL_NAME)) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
+    };
+    const currentSession = () => {
+      const route = ctx.ui.router.current();
+      return route.type === "session" ? route.sessionID : undefined;
+    };
+
+    const disposers = [
+      ctx.ui.slot({
+        append: "sidebar.content",
+        render: (input) => (
+          <Sidebar
+            ctx={ctx}
+            client={client}
+            sessionID={input.sessionID}
+            showUnread={prefs.showUnread}
+            cursor={browse.sessionID() === input.sessionID ? browse.cursor() : undefined}
+            onOpen={openPreview}
+          />
+        ),
+      }),
+      ctx.ui.slot({
+        append: "session.panel",
+        render: (input) => (
+          <Show when={input.name === PANEL_NAME && selected()}>
+            {(filePath) => <Preview ctx={ctx} client={client} panel={input} filePath={filePath()} />}
+          </Show>
+        ),
+      }),
+      // Layers live inside a mounted component, like OpenCode's own plugins register theirs.
+      ctx.ui.slot({
+        append: "app",
+        render: () => {
+          ctx.keymap.layer(() => ({
+            commands: [
+              {
+                id: "context-inspector.files",
+                title: "Context files",
+                description: "Pick a project context file and preview what the agent read of it",
+                group: "Session",
+                palette: true,
+                slash: { name: "context" },
+                enabled: () => currentSession() !== undefined,
+                run: async () => {
+                  const sessionID = currentSession();
+                  if (!sessionID) return;
+                  const filePath = await pickFile(ctx, client, sessionID);
+                  if (filePath) openPreview(filePath);
+                },
+              },
+              {
+                id: "context-inspector.toggle-unread",
+                title: "Show/hide unread context files",
+                group: "Session",
+                palette: true,
+                slash: { name: "context-unread" },
+                run: async () => {
+                  browse.stop();
+                  await setPrefs((draft) => {
+                    draft.showUnread = !draft.showUnread;
+                  });
+                },
+              },
+              {
+                id: "context-inspector.browse",
+                title: "Browse context files in sidebar",
+                group: "Session",
+                palette: true,
+                slash: { name: "context-browse" },
+                enabled: () => currentSession() !== undefined,
+                run: () => {
+                  const sessionID = currentSession();
+                  if (sessionID) void browse.start(sessionID);
+                },
+              },
+            ],
+          }));
+          ctx.keymap.layer(() => ({
+            mode: BROWSE_MODE,
+            enabled: browse.sessionID() !== undefined,
+            commands: [
+              { title: "Previous file", bind: "up,k", run: () => browse.move(-1) },
+              { title: "Next file", bind: "down,j", run: () => browse.move(1) },
+              {
+                title: "Preview file",
+                bind: "return",
+                run: () => {
+                  const file = browse.current();
+                  browse.stop();
+                  if (file) openPreview(file.filePath);
+                },
+              },
+              { title: "Stop browsing", bind: "escape", run: () => browse.stop() },
+            ],
+          }));
+          return null;
+        },
+      }),
+    ];
+
+    return () => {
+      browse.stop();
+      for (const dispose of disposers) dispose();
+    };
+  },
+});
+
+/** Keyboard browsing of the sidebar list: owns the keymap mode and the cursor. */
+function createBrowseState(ctx: Plugin.Context, client: ICoverageClient, showUnread: () => boolean) {
+  const [sessionID, setSessionID] = createSignal<string>();
+  const [files, setFiles] = createSignal<readonly IFileCoverage[]>([]);
+  const [cursor, setCursor] = createSignal(0);
+  let popMode: (() => void) | undefined;
+
+  const stop = () => {
+    popMode?.();
+    popMode = undefined;
+    setSessionID(undefined);
+  };
+  return {
+    sessionID,
+    cursor,
+    current: () => files()[cursor()],
+    move: (delta: number) => setCursor((c) => Math.min(Math.max(c + delta, 0), Math.max(files().length - 1, 0))),
+    stop,
+    async start(id: string) {
+      // Same server-sorted list and filter as the sidebar, so cursor indexes line up.
+      const report = await client.coverage(id).catch(() => undefined);
+      const visible = report ? visibleFiles(report.files, showUnread()) : [];
+      if (visible.length === 0) {
+        ctx.ui.toast.show({ variant: "info", message: "No context files to browse; /context-unread shows unread ones" });
+        return;
+      }
+      stop();
+      setFiles(visible);
+      setCursor(0);
+      setSessionID(id);
+      popMode = ctx.keymap.mode.push(BROWSE_MODE);
+    },
+  };
+}
+
+async function pickFile(ctx: Plugin.Context, client: ICoverageClient, sessionID: string) {
+  let files: readonly IFileCoverage[];
+  try {
+    files = (await client.coverage(sessionID)).files;
+  } catch (error) {
+    ctx.ui.toast.show({ variant: "error", message: `Context inspector: ${(error as Error).message}` });
+    return undefined;
+  }
+  return ctx.ui.dialog.select({
+    title: "Context files",
+    placeholder: "Filter files",
+    options: files.map((file) => ({
+      title: `${STATUS_GLYPH[file.status]} ${file.filePath}`,
+      value: file.filePath,
+      description: describeFile(file) || file.status,
+    })),
+  });
+}

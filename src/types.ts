@@ -38,6 +38,8 @@ export interface IContextInspectorOptions {
   readonly tools: readonly string[];
   /** Directory the per-session JSONL files are written to. */
   readonly dataDir: string;
+  /** Project-relative files OpenCode injects into the prompt on its own (shown as auto-loaded, not unread). */
+  readonly autoLoaded: readonly string[];
 }
 
 /** The subset of the V2 `tool.hook("execute.before")` event the tracker reads. */
@@ -63,4 +65,53 @@ export interface IContextReadStore {
 
 export interface IClock {
   now(): Date;
+}
+
+/** Per-file verdict shown by the TUI. */
+export enum ECoverageStatus {
+  /** Never read, and not injected by OpenCode. */
+  Unread = "unread",
+  /** OpenCode injects it into the prompt itself; no explicit read was seen. */
+  AutoLoaded = "auto",
+  /** Some, but not all, lines were read. */
+  Partial = "partial",
+  /** Every line was read at least once. */
+  Full = "full",
+  /** Only failed reads. */
+  Error = "error",
+}
+
+/** 1-based, inclusive line range. */
+export interface ILineRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface IFileCoverage {
+  /** Project-relative POSIX path. */
+  readonly filePath: string;
+  readonly status: ECoverageStatus;
+  /** False for paths that were requested but are not (or no longer) files on disk. */
+  readonly exists: boolean;
+  readonly lineCount: number;
+  /** Merged ranges of successful reads, clamped to the file. */
+  readonly ranges: readonly ILineRange[];
+  readonly readCount: number;
+  readonly errorCount: number;
+  readonly lastReadAt?: string;
+  /** The file changed on disk after its last successful read. */
+  readonly modifiedSinceRead: boolean;
+}
+
+export interface ICoverageReport {
+  readonly sessionID: string;
+  readonly files: readonly IFileCoverage[];
+}
+
+/** Current file contents plus what the session read of it. Read live, never persisted. */
+export interface IFilePreview {
+  readonly coverage: IFileCoverage;
+  readonly lines: readonly string[];
+  /** The file has more lines than `lines` holds. */
+  readonly truncated: boolean;
 }

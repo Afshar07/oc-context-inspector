@@ -1,8 +1,13 @@
 # opencode-context-inspector
 
 OpenCode **V2** plugin (`@opencode/plugin@2.0.32`, tested on `opencode` CLI `2.0.32`) that records which
-project-context files an agent explicitly reads. Observation only: it registers `ctx.tool.hook`
-callbacks that read events and never write to `input`, `result` or `error`.
+project-context files an agent explicitly reads, and shows it in the terminal UI. Observation only: it registers
+`ctx.tool.hook` callbacks that read events and never write to `input`, `result` or `error`.
+
+It has two halves:
+
+* **server** (`index.ts`): records reads to JSONL and serves them over a plugin RPC (`context-inspector`).
+* **terminal UI** (`tui.ts`): a sidebar section and a preview panel that call that RPC.
 
 ## What is recorded
 
@@ -16,6 +21,41 @@ Failed reads have `"status":"error"` plus a message truncated to 200 chars. File
 Records are written when the call finishes, so a call that never reaches `execute.after` (e.g. process
 killed mid-read) leaves no record.
 
+## Terminal UI
+
+**Sidebar — "Context files".** Files matching `contextPaths` in the project, plus any missing file the session
+tried to read, with what the current session read of it. Updates live as the agent reads. Unread files are hidden
+by default; `/context-unread` toggles them (remembered across restarts).
+
+```
+Context files
+2/3 read
+◐ .ai/architecture.md  L10–39/60 · 3×
+✕ .ai/missing.md       missing
+● AGENTS.md            2×
+1 unread hidden · /context-unread
+```
+
+| glyph | meaning |
+| --- | --- |
+| `●` | every line was read |
+| `◐` | some lines were read (`L10–39/60`, or `45/120 lines` for several ranges) |
+| `○` | not read |
+| `◌` | not read explicitly, but OpenCode injects it into the prompt itself (`autoLoaded`) |
+| `✕` | only failed reads |
+
+`N×` is the number of successful reads; `changed` means the file was modified after its last read.
+
+**Preview panel.** Opens in the session panel and shows the file *as it is now*: lines the agent read are marked
+with `▌` and highlighted, the rest are dimmed. It follows new reads live. `esc` closes it while focused.
+File contents are read on demand for display and never written anywhere.
+
+**Opening a preview:**
+
+* click a file in the sidebar;
+* `/context` (also in the command palette): pick from a list of all context files, unread included;
+* `/context-browse`: select in the sidebar with `↑`/`↓` (or `k`/`j`), `enter` to preview, `esc` to stop.
+
 ## Options
 
 | option | default | meaning |
@@ -23,10 +63,12 @@ killed mid-read) leaves no record.
 | `contextPaths` | `["AGENTS.md", ".ai/**"]` | globs relative to the project; a pattern without `/` matches that basename at any depth; `dir/**` also matches `dir` itself |
 | `tools` | `["read"]` | tools to inspect |
 | `dataDir` | `.opencode/context-inspector` | output directory (relative to the project) |
+| `autoLoaded` | `["AGENTS.md"]` | project-relative files OpenCode injects on its own; shown as `◌` instead of unread |
 
 ## Install
 
-Local directory in `opencode.jsonc` (a root `index.ts` is required for directory plugins):
+Local directory in `opencode.jsonc` (a root `index.ts` is required for directory plugins; the root `tui.ts` is picked
+up as the terminal-UI half):
 
 ```jsonc
 { "plugins": [{ "package": "/path/to/opencode-context-inspector", "options": { "contextPaths": ["AGENTS.md", ".ai/**", "docs/context/**"] } }] }
@@ -46,7 +88,13 @@ e2e/run.sh /path/to/opencode2     # two concurrent real OpenCode sessions (see b
   do not go through the tool hooks and are not recorded.
 * The `read` tool's V2 arguments are `path`, `offset`, `limit` (verified from live hook events); `filePath`
   is also accepted. `offset`/`limit` are stored exactly as requested.
-* Not implemented (by design for this PoC): sidebar, suggestions, AI analysis.
+* Line coverage assumes the V2 `read` tool's semantics: `offset` is 1-based and `limit` defaults to, and is capped
+  at, 2000 lines.
+* The preview shows the current file. If it changed after the read, highlighted lines may not be what the agent saw;
+  the `changed` marker flags this.
+* OpenCode compiles `.tsx` with its Solid transform only outside `node_modules`, so the TUI half works as a local
+  directory plugin. Publishing it as an npm package would need the TUI precompiled first.
+* Not implemented (by design for this PoC): suggestions, AI analysis.
 
 ## E2E demonstration
 

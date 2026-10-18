@@ -4,9 +4,10 @@
   "description": "OpenCode V2 plugin that records which project-context files an agent explicitly reads.",
   "type": "module",
   "license": "MIT",
-  "files": ["index.ts", "src"],
+  "files": ["index.ts", "tui.ts", "src"],
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./tui": "./tui.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -16,11 +17,17 @@
     "@opencode/plugin": "2.0.32"
   },
   "peerDependencies": {
-    "effect": "^4.0.0"
+    "@opentui/solid": ">=0.5.17",
+    "effect": "^4.0.0",
+    "solid-js": "^1.9.0"
   },
   "devDependencies": {
+    "@opencode/theme": "2.0.32",
+    "@opentui/core": "0.6.6",
+    "@opentui/solid": "0.6.6",
     "@types/node": "^22.0.0",
     "effect": "4.0.1",
+    "solid-js": "1.9.12",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

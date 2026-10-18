@@ -1,12 +1,20 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import plugin, { readSessionRecords, resolveOptions } from "../src/index.js";
+import { ECoverageStatus, type ICoverageReport } from "../src/types.js";
 import { withTempDir } from "./helpers.js";
 
 type Hook = (event: Record<string, unknown>) => unknown;
 
 /** Minimal stand-in for the V2 plugin context: just enough to capture tool hooks. */
-function fakeContext(directory: string, options: Record<string, unknown> = {}) {
+function fakeContext(directory: string, options: Record<string, unknown> = {}, withRpc = false) {
   const hooks: Record<string, Hook> = {};
+  const rpc = {
+    id: undefined as string | undefined,
+    handlers: {} as Record<string, (input: Record<string, unknown>) => Promise<unknown>>,
+    emitted: [] as unknown[][],
+  };
   const ctx = {
     options,
     location: { directory },
@@ -16,8 +24,17 @@ function fakeContext(directory: string, options: Record<string, unknown> = {}) {
         return { dispose: async () => {} };
       },
     },
+    ...(withRpc && {
+      rpc: {
+        register: async (definition: { id: string }, handlers: typeof rpc.handlers) => {
+          rpc.id = definition.id;
+          rpc.handlers = handlers;
+          return { dispose: async () => {}, events: { emit: async (...args: unknown[]) => void rpc.emitted.push(args) } };
+        },
+      },
+    }),
   };
-  return { ctx: ctx as never, hooks };
+  return { ctx: ctx as never, hooks, rpc };
 }
 
 describe("plugin wiring", () => {
@@ -62,11 +79,39 @@ describe("plugin wiring", () => {
     }));
 });
 
+describe("plugin RPC", () => {
+  it("serves coverage and previews, and announces each recorded read", () =>
+    withTempDir(async (dir) => {
+      await mkdir(`${dir}/.ai`);
+      await writeFile(`${dir}/.ai/x.md`, ["one", "two", "three", ""].join("\n"));
+      const { ctx, hooks, rpc } = fakeContext(dir, {}, true);
+      await plugin.setup(ctx);
+      expect(rpc.id).toBe("context-inspector");
+
+      const input = { path: ".ai/x.md", offset: 2, limit: 1 };
+      await hooks["execute.before"]!({ tool: "read", sessionID: "s1", id: "c1", input });
+      await hooks["execute.after"]!({ tool: "read", sessionID: "s1", id: "c1", input, status: "completed" });
+      expect(rpc.emitted).toEqual([["read", { sessionID: "s1", filePath: ".ai/x.md" }]]);
+
+      const report = (await rpc.handlers.coverage!({ sessionID: "s1" })) as ICoverageReport;
+      expect(report.files.find((f) => f.filePath === ".ai/x.md")).toMatchObject({
+        status: ECoverageStatus.Partial,
+        ranges: [{ start: 2, end: 2 }],
+      });
+      expect(await rpc.handlers.preview!({ sessionID: "s1", filePath: ".ai/x.md" })).toMatchObject({
+        found: true,
+        preview: { lines: ["one", "two", "three"] },
+      });
+      expect(await rpc.handlers.preview!({ sessionID: "s1", filePath: "package.json" })).toEqual({ found: false });
+    }));
+});
+
 describe("resolveOptions", () => {
   it("applies defaults and rejects malformed values", () => {
     const o = resolveOptions({ contextPaths: [1], tools: "read" }, "/p");
     expect(o.contextPaths).toEqual(["AGENTS.md", ".ai/**"]);
     expect(o.tools).toEqual(["read"]);
-    expect(o.dataDir).toBe("/p/.opencode/context-inspector");
+    expect(o.dataDir).toBe(path.resolve("/p", ".opencode/context-inspector"));
+    expect(o.autoLoaded).toEqual(["AGENTS.md"]);
   });
 });

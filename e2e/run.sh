@@ -3,7 +3,8 @@
 # Usage: e2e/run.sh /path/to/opencode2
 set -euo pipefail
 OC="${1:?path to opencode2 binary}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# `pwd -W` gives a Windows path under Git Bash, which the native opencode binary needs.
+ROOT="$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))"
 PROJECT="$ROOT/e2e/project"
 SANDBOX="$(mktemp -d)"
 export XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_STATE_HOME="$SANDBOX/state" XDG_CACHE_HOME="$SANDBOX/cache"
