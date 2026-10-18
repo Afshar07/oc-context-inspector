@@ -14,8 +14,8 @@ export interface IAnalysisProps {
   readonly mode: EAnalysisMode;
   /** `provider/model` picked for this run; undefined for the configured default. */
   readonly model: string | undefined;
-  /** Opens a follow-up session seeded with this answer. */
-  readonly onContinue: (answer: Extract<IAnalysisResult, { ok: true }>) => Promise<void>;
+  /** Opens a follow-up session seeded with this answer: a new session, or a fork of the analyzed one. */
+  readonly onContinue: (answer: Extract<IAnalysisResult, { ok: true }>, fork: boolean) => Promise<void>;
 }
 
 const TITLES: Readonly<Record<EAnalysisMode, string>> = {
@@ -34,12 +34,12 @@ export function Analysis(props: IAnalysisProps) {
   );
 
   const [continuing, setContinuing] = createSignal(false);
-  const continueInSession = async () => {
+  const continueInSession = async (fork: boolean) => {
     const answer = result();
     if (!answer?.ok || continuing()) return;
     setContinuing(true);
     try {
-      await props.onContinue(answer);
+      await props.onContinue(answer, fork);
     } finally {
       setContinuing(false);
     }
@@ -50,7 +50,9 @@ export function Analysis(props: IAnalysisProps) {
     commands: [
       { title: "Close analysis", bind: "escape", run: () => props.panel.close() },
       { title: "Run analysis again", bind: "r", run: () => void (result.loading || setRun((n) => n + 1)) },
-      { title: "Continue in a session", bind: "n", run: () => void continueInSession() },
+      { title: "Continue in a new session", bind: "n", run: () => void continueInSession(false) },
+      // A fork carries the whole conversation, so it costs more tokens; only a session analysis can be forked.
+      { title: "Continue in a fork of this session", bind: "f", run: () => void (props.mode === "session" && continueInSession(true)) },
     ],
   }));
 
@@ -88,7 +90,7 @@ export function Analysis(props: IAnalysisProps) {
           const legacy = r?.ok && r.readsOnlySessions ? ` (${r.readsOnlySessions} older, reads only)` : "";
           const sessions = r?.ok && r.sessionCount !== undefined ? `${r.sessionCount} sessions${legacy} · ` : "";
           if (continuing()) return "Opening a session…";
-          const next = r?.ok ? "n continue in session · " : "";
+          const next = r?.ok ? (props.mode === "session" ? "n new session · f fork · " : "n new session · ") : "";
           return `${model}${sessions}${next}r rerun · esc close`;
         })()}
       </text>

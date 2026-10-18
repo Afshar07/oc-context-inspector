@@ -14,6 +14,9 @@ export interface ISidebarProps {
   readonly showUnread: boolean;
   /** Row highlighted by keyboard browsing, if browsing is active. */
   readonly cursor: number | undefined;
+  /** Only the header line (with the read count) is shown. */
+  readonly collapsed: boolean;
+  readonly onToggle: () => void;
   readonly onOpen: (filePath: string) => void;
 }
 
@@ -29,9 +32,15 @@ export function Sidebar(props: ISidebarProps) {
   return (
     <Show when={allFiles().length > 0 || state().error}>
       <box flexDirection="column">
-        <text fg={theme.text.base}>
-          <b>Context files</b>
-        </text>
+        <box flexDirection="row" gap={1} onMouseUp={props.onToggle}>
+          <text fg={theme.text.base}>
+            <b>{props.collapsed ? "▸" : "▾"} Context files</b>
+          </text>
+          <Show when={props.collapsed && state().report}>
+            {(report) => <text fg={theme.text.muted}>{summaryLine(report())}</text>}
+          </Show>
+        </box>
+        <Show when={!props.collapsed}>
         <Show when={state().report}>{(report) => <text fg={theme.text.muted}>{summaryLine(report())}</text>}</Show>
         <Show when={state().report && trackingNote(state().report!)}>
           {(note) => <text fg={theme.text.faint}>{note()}</text>}
@@ -68,6 +77,7 @@ export function Sidebar(props: ISidebarProps) {
         </Show>
         <Show when={props.cursor !== undefined}>
           <text fg={theme.text.faint}>↑↓ select · enter preview · esc done</text>
+        </Show>
         </Show>
       </box>
     </Show>

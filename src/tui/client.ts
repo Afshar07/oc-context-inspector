@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode/plugin/tui";
+import { parseModelRef } from "../model-ref.js";
 import { ContextInspectorRpc } from "../rpc.js";
 import type { ICoverageClient } from "./source.js";
 import { buildTimeline } from "./timeline.js";
@@ -11,7 +12,14 @@ import { buildTimeline } from "./timeline.js";
  */
 export async function startFollowUpSession(
   ctx: Plugin.Context,
-  input: { readonly fork: boolean; readonly sessionID: string; readonly title: string; readonly message: string },
+  input: {
+    readonly fork: boolean;
+    readonly sessionID: string;
+    readonly title: string;
+    readonly message: string;
+    /** `provider/model[#variant]` the analysis ran on; the new session switches to it. Ignored when not a model id. */
+    readonly model?: string;
+  },
 ): Promise<string> {
   // Session calls are routed by session ID; only a new session needs the project's directory.
   const directory = ctx.data.session.get(input.sessionID)?.location.directory;
@@ -20,6 +28,10 @@ export async function startFollowUpSession(
     : await ctx.client.session.create({ title: input.title, ...(directory && { location: { directory } }) });
   // A fork keeps the original title; the rename is cosmetic, so a failure is not fatal.
   if (input.fork) await ctx.client.session.update({ sessionID: session.id, title: input.title }).catch(() => {});
+  // A fork otherwise keeps the analyzed session's model, not the one the user just picked for the analysis.
+  // "OpenCode default" (no explicit model) does not parse and leaves the session as it is. Not fatal if it fails.
+  const model = parseModelRef(input.model);
+  if (model) await ctx.client.session.switchModel({ sessionID: session.id, model }).catch(() => {});
   await ctx.client.session.synthetic({
     sessionID: session.id,
     text: input.message,
@@ -57,7 +69,7 @@ export async function pickAnalysisModel(ctx: Plugin.Context, sessionID: string, 
 }
 
 /** The session's user messages: the task the analysis judges relevance against. */
-async function userPrompts(ctx: Plugin.Context, sessionID: string): Promise<string[]> {
+export async function userPrompts(ctx: Plugin.Context, sessionID: string): Promise<string[]> {
   await ctx.data.session.message.sync(sessionID).catch(() => {});
   return ctx.data.session.message
     .list(sessionID)

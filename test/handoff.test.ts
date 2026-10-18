@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { summarize } from "../src/coverage.js";
-import { handoffMessage } from "../src/tui/handoff.js";
+import { handoffMessage, MAX_BRIEF_TASK_CHARS } from "../src/tui/handoff.js";
 import { EReadStatus } from "../src/types.js";
 
 const read = summarize(
@@ -38,5 +38,26 @@ describe("handoffMessage", () => {
     expect(text).toContain("4 recorded sessions");
     expect(text).toContain("Merge X");
     expect(text).not.toContain("## Context reads");
+  });
+
+  it("briefs a new session with the task, and leaves it out of a fork that already has the conversation", () => {
+    const base = { mode: "session" as const, answer: "Fix X", model: "p/m", files: [read] };
+    const fresh = handoffMessage({ ...base, task: ["fix the build", "and the tests"] });
+    expect(fresh).toContain("new session");
+    expect(fresh).toContain("## Task of the analyzed session");
+    expect(fresh).toContain("fix the build\n---\nand the tests");
+    expect(fresh.indexOf("## Task")).toBeLessThan(fresh.indexOf("## Review"));
+    const forked = handoffMessage({ ...base, task: ["fix the build"], forked: true });
+    expect(forked).not.toContain("## Task of the analyzed session");
+    expect(forked).not.toContain("new session");
+  });
+
+  it("caps the carried task and omits the section when there is none", () => {
+    const base = { mode: "session" as const, answer: "a", model: "p/m", files: [] };
+    const long = handoffMessage({ ...base, task: ["x".repeat(MAX_BRIEF_TASK_CHARS + 500)] });
+    expect(long).toContain("…(truncated)");
+    expect(long.length).toBeLessThan(MAX_BRIEF_TASK_CHARS + 1_000);
+    expect(handoffMessage({ ...base, task: [] })).not.toContain("## Task");
+    expect(handoffMessage({ mode: "project", answer: "a", model: "p/m", files: [], task: ["t"] })).not.toContain("## Task");
   });
 });

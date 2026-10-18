@@ -125,7 +125,7 @@ describe("plugin RPC analysis", () => {
       await plugin.setup(ctx);
       expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: ["ship it"] })).toEqual({
         ok: true,
-        text: "looks fine",
+        text: "looks fine\n\n---\n_Timeline: unavailable, so the review cannot judge ordering._",
         model: "anthropic/claude-x#high",
       });
       expect(calls[0]!.prompt).toContain("ship it");

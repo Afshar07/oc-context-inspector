@@ -192,7 +192,9 @@ describe("AnalysisService", () => {
   it("analyzes one session from its coverage and outlines", () =>
     withTempDir(async (dir) => {
       const { service, prompts } = await setup(dir, false);
-      expect(await service.analyzeSession("s1", ["Explain the data flow"])).toBe("MODEL ANSWER");
+      expect(await service.analyzeSession("s1", ["Explain the data flow"])).toBe(
+        "MODEL ANSWER\n\n---\n_Timeline: unavailable, so the review cannot judge ordering._",
+      );
       expect(prompts[0]).toContain("Explain the data flow");
       expect(prompts[0]).toMatch(/\[partly read\] # Overview/);
       expect(prompts[0]).not.toContain("intro\n");
@@ -212,6 +214,9 @@ describe("AnalysisService", () => {
       expect(off.prompts[0]).toContain("read .ai/doc.md (estimated: requested offset 2, limit 3)");
       expect(off.prompts[0]).toContain("shell command (exit 0)");
       expect(off.prompts[0]).not.toContain("npm test");
+      expect(await off.service.analyzeSession("s1", ["t"], undefined, timeline)).toContain(
+        "_Timeline: 2 steps · 0 user, 1 tool, 1 shell (1 with exit code) · 0 subagent sessions · 1 of 1 recorded context reads matched to a step · commands hidden_",
+      );
       const on = await setup(dir, true);
       await on.service.analyzeSession("s1", ["t"], undefined, timeline);
       expect(on.prompts[0]).toContain("shell command (exit 0): npm test");

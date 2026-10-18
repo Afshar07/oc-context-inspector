@@ -3,7 +3,7 @@ import { Plugin } from "@opencode/plugin/tui";
 import { createSignal, Match, Show, Switch } from "solid-js";
 import type { IFileCoverage } from "../types.js";
 import { Analysis, type EAnalysisMode } from "./Analysis.js";
-import { DEFAULT_MODEL, pickAnalysisModel, rpcCoverageClient, startFollowUpSession } from "./client.js";
+import { DEFAULT_MODEL, pickAnalysisModel, rpcCoverageClient, startFollowUpSession, userPrompts } from "./client.js";
 import { describeFile, STATUS_GLYPH, visibleFiles } from "./format.js";
 import { handoffMessage } from "./handoff.js";
 import { Preview } from "./Preview.js";
@@ -24,10 +24,19 @@ export default Plugin.define({
     const client = rpcCoverageClient(ctx);
     const [selected, setSelected] = createSignal<string>();
     // Durable, so the choice survives TUI restarts.
-    const [prefs, setPrefs] = ctx.storage.store("prefs", { initial: { showUnread: false, analysisModel: DEFAULT_MODEL } });
+    const [prefs, setPrefs] = ctx.storage.store("prefs", { initial: { showUnread: false, collapsed: false, analysisModel: DEFAULT_MODEL } });
     // Model picked for the analysis panel currently open; read by its resource, so a new pick reruns it.
     const [analysisModel, setAnalysisModel] = createSignal<string>();
     const browse = createBrowseState(ctx, client, () => prefs.showUnread);
+
+    const setCollapsed = (collapsed: boolean) =>
+      setPrefs((draft) => {
+        draft.collapsed = collapsed;
+      });
+    const toggleCollapsed = () => {
+      browse.stop();
+      return setCollapsed(prefs.collapsed !== true);
+    };
 
     const openPreview = (filePath: string) => {
       setSelected(filePath);
@@ -43,15 +52,24 @@ export default Plugin.define({
       if (!ctx.ui.panel.open(ANALYSIS_PANELS[mode])) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
     };
     // Follow-up session for acting on a review: the review waits, queued, for the user's first instruction.
-    const continueInSession = (mode: EAnalysisMode, sessionID: string) => async (answer: { text: string; model: string; sessionCount?: number }) => {
+    const continueInSession = (mode: EAnalysisMode, sessionID: string) => async (answer: { text: string; model: string; sessionCount?: number }, fork: boolean) => {
       try {
         const files = mode === "session" ? ((await client.coverage(sessionID).catch(() => undefined))?.files ?? []) : [];
         const title = ctx.data.session.get(sessionID)?.title;
         const id = await startFollowUpSession(ctx, {
-          fork: mode === "session",
+          fork,
           sessionID,
+          model: answer.model,
           title: mode === "session" ? `Context fixes: ${title ?? "session"}` : "Context fixes: project review",
-          message: handoffMessage({ mode, answer: answer.text, model: answer.model, sessionCount: answer.sessionCount, files }),
+          message: handoffMessage({
+            mode,
+            answer: answer.text,
+            model: answer.model,
+            sessionCount: answer.sessionCount,
+            files,
+            forked: fork,
+            ...(mode === "session" && !fork && { task: await userPrompts(ctx, sessionID) }),
+          }),
         });
         ctx.ui.panel.close();
         if (!ctx.ui.tabs.focus(id)) ctx.ui.router.navigate({ type: "session", sessionID: id });
@@ -75,6 +93,8 @@ export default Plugin.define({
             sessionID={input.sessionID}
             showUnread={prefs.showUnread}
             cursor={browse.sessionID() === input.sessionID ? browse.cursor() : undefined}
+            collapsed={prefs.collapsed === true}
+            onToggle={toggleCollapsed}
             onOpen={openPreview}
           />
         ),
@@ -173,6 +193,14 @@ export default Plugin.define({
                 },
               },
               {
+                id: "context-inspector.collapse",
+                title: "Collapse/expand context files in sidebar",
+                group: "Session",
+                palette: true,
+                slash: { name: "context-collapse" },
+                run: () => toggleCollapsed(),
+              },
+              {
                 id: "context-inspector.browse",
                 title: "Browse context files in sidebar",
                 group: "Session",
@@ -181,7 +209,10 @@ export default Plugin.define({
                 enabled: () => currentSession() !== undefined,
                 run: () => {
                   const sessionID = currentSession();
-                  if (sessionID) void browse.start(sessionID);
+                  if (!sessionID) return;
+                  // Browsing needs the list on screen.
+                  if (prefs.collapsed === true) void setCollapsed(false);
+                  void browse.start(sessionID);
                 },
               },
             ],

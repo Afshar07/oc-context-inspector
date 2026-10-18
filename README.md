@@ -43,7 +43,8 @@ nothing are missing from the data, and the review says its ratios for that perio
 
 **Sidebar — "Context files".** Files matching `contextPaths` in the project, plus any missing file the session
 tried to read, with what the current session read of it. Updates live as the agent reads (including reads by its
-subagents). Unread files are hidden by default; `/context-unread` toggles them (remembered across restarts).
+subagents). Unread files are hidden by default; `/context-unread` toggles them (remembered across restarts). Click the section title or run `/context-collapse` to
+minimize it to one line (`▸ Context files 2/3 read`); that is remembered too, and `/context-browse` expands it again.
 
 ```
 Context files
@@ -111,8 +112,14 @@ the conversation and do not change it.
 
 **Acting on a review: `n` in the panel** opens a follow-up session where an agent can make the changes:
 
-* after `/context-analyze` it **forks** the analyzed session, so the agent has the full conversation and task;
-* after `/context-review` it starts a **new** session in the project (no history; the review names the files).
+* `n` starts a **new** session in the project. It has no history, so after `/context-analyze` the first message
+  carries a brief: the analyzed session's user messages (capped at 3,000 characters), the review, and what was read.
+  After `/context-review` the review names the files. This is the cheap option: the session starts small.
+* `f` (after `/context-analyze` only) **forks** the analyzed session, so the agent has the full conversation. Every
+  token of that history is sent again with each request, so use it only when the agent must see what happened.
+
+The new session switches to the model you picked for the analysis (the footer's model); with "Default" it keeps the
+session's own model.
 
 The review (plus, for a session analysis, the list of what was read) is added as a **queued** message: nothing runs
 until you type an instruction, and the agent then receives the review first and your instruction second. It has the

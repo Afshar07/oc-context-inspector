@@ -308,6 +308,25 @@ export function formatTimeline(events: readonly ITimelineEvent[], render: ITimel
   return lines.join("\n");
 }
 
+/** What reached the model, in one line: counts per step kind and how many recorded reads were joined to a step. */
+export function summarizeTimeline(
+  events: readonly ITimelineEvent[],
+  reads: ReadonlyMap<string, IContextReadRecord>,
+  includeCommands: boolean,
+): string {
+  const count = (pred: (e: ITimelineEvent) => boolean) => events.filter(pred).length;
+  const shells = events.filter((e) => e.kind === ETimelineKind.Shell);
+  const subagent = new Set(events.map((e) => e.sessionID)).size - 1;
+  const matched = new Set(events.flatMap((e) => (e.callID !== undefined && reads.has(e.callID) ? [e.callID] : []))).size;
+  return [
+    `Timeline: ${events.length} steps`,
+    `${count((e) => e.kind === ETimelineKind.User)} user, ${count((e) => e.kind === ETimelineKind.Tool)} tool, ${shells.length} shell (${shells.filter((e) => e.exit !== undefined).length} with exit code)`,
+    `${subagent} subagent session${subagent === 1 ? "" : "s"}`,
+    `${matched} of ${reads.size} recorded context reads matched to a step`,
+    includeCommands ? "commands shown" : "commands hidden",
+  ].join(" · ");
+}
+
 const TIMELINE_UNAVAILABLE =
   "(unavailable: the session's steps could not be loaded. Do not claim anything about what happened before or after another action; answer \"unknown\" for ordering.)";
 
@@ -471,23 +490,30 @@ export class AnalysisService {
       content: this.options.includeContent && lines ? budget.take(lines.join("\n")) : undefined,
     }));
     const rendered = timeline && timeline.events.length > 0 ? await this.renderTimeline(sessionID, timeline) : undefined;
-    return this.generate(buildSessionPrompt({ task, files, ...(rendered !== undefined && { timeline: rendered }) }), model);
+    const answer = await this.generate(
+      buildSessionPrompt({ task, files, ...(rendered !== undefined && { timeline: rendered.text }) }),
+      model,
+    );
+    // Lets the user see from the review itself whether the timeline reached the model.
+    return `${answer}
+
+---
+_${rendered?.summary ?? "Timeline: unavailable, so the review cannot judge ordering."}_`;
   }
 
   private async renderTimeline(
     sessionID: string,
     timeline: { readonly events: readonly ITimelineEvent[]; readonly omitted?: number },
-  ): Promise<string> {
+  ): Promise<{ readonly text: string; readonly summary: string }> {
     const reads = new Map<string, IContextReadRecord>();
     for (const id of new Set(timeline.events.map((e) => e.sessionID))) {
       for (const record of await readSessionRecords(this.dataDir, id).catch(() => [])) reads.set(record.callID, record);
     }
-    return formatTimeline(timeline.events, {
-      sessionID,
-      reads,
-      omitted: timeline.omitted ?? 0,
-      includeCommands: this.options.includeContent,
-    });
+    const includeCommands = this.options.includeContent;
+    return {
+      text: formatTimeline(timeline.events, { sessionID, reads, omitted: timeline.omitted ?? 0, includeCommands }),
+      summary: summarizeTimeline(timeline.events, reads, includeCommands),
+    };
   }
 
   async reviewProject(model?: IModelRef): Promise<IProjectReview> {
