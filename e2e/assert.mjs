@@ -95,12 +95,17 @@ eq("E: its own read (the subagent's reads are not its own)", records("E").map((r
 check("original call IDs are preserved", records("S").every((r) => /^call_SCENARIO-S_\d+$/.test(r.callID)));
 
 // --- session tracking: zero-read sessions are observed too --------------------------------------------------------
-eq("observed sessions: A, B, C, D, E and S (D read nothing)", markers.length, 6);
+eq("observed sessions: A-F plus the subagents S and N (D, F and N read no context)", markers.length, 8);
 const markerIDs = new Set(markers.map((m) => m.sessionID));
 check("every session with records is also marked as observed", [...bySession.keys()].every((id) => markerIDs.has(id)));
-eq("exactly one observed session has no records (D)", [...markerIDs].filter((id) => !bySession.has(id)).length, 1);
+eq("exactly three observed sessions have no records (D, F, N)", [...markerIDs].filter((id) => !bySession.has(id)).length, 3);
 check("session markers carry a lineage", markers.every((m) => m.lineage === "root" || m.lineage === "child"), JSON.stringify(markers.map((m) => m.lineage)));
-eq("exactly one child session, under its spawner", markers.filter((m) => m.lineage === "child").map((m) => [m.sessionID, m.parentSessionID]), [[sub, lead]]);
+// F delegates to N, which only reads a non-context file: a subagent with zero context reads must still be a known child.
+const children = markers.filter((m) => m.lineage === "child");
+eq("two child sessions", children.length, 2);
+check("S is a child of E", children.some((m) => m.sessionID === sub && m.parentSessionID === lead));
+const zeroRead = children.find((m) => m.sessionID !== sub);
+check("N (zero context reads) is a child of a root session that also read nothing", zeroRead !== undefined && markers.some((m) => m.sessionID === zeroRead.parentSessionID && m.lineage === "root") && !bySession.has(zeroRead.sessionID) && !bySession.has(zeroRead.parentSessionID));
 check("tracking start is recorded", existsSync(path.join(dataDir, "tracking.json")));
 
 // --- privacy: no file contents on disk ----------------------------------------------------------------------------

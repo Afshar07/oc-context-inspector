@@ -301,3 +301,24 @@ export interface ITimelineEvent {
   readonly command?: string;
   readonly exit?: number;
 }
+
+/** Whether a session's messages made it into the timeline. Values are the RPC form. */
+export enum ETimelineSessionState {
+  Loaded = "loaded",
+  /** Its messages could not be loaded: the session exists but its steps are missing. */
+  Unavailable = "unavailable",
+}
+
+/** One session behind a timeline, so a subagent with no steps (or no readable messages) is still visible. */
+export interface ITimelineSessionInfo {
+  readonly sessionID: string;
+  readonly parentID?: string;
+  readonly agentID?: string;
+  /** 0 for the analyzed session, 1 for its subagents, 2 for theirs. */
+  readonly depth: number;
+  readonly state: ETimelineSessionState;
+  /** Messages OpenCode returned; 0 when unavailable. */
+  readonly messages: number;
+  /** Why the messages are missing: a short, non-sensitive reason. */
+  readonly reason?: string;
+}

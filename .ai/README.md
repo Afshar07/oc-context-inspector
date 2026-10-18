@@ -25,6 +25,7 @@ step 7, then follow the route exactly in order.
 
 - Continuing in-progress work: `ongoing/README.md` → only the matching task document → source.
 - Server-side change (tracker, store, coverage, analysis, RPC): `architecture.md` → `invariants.md` → source → `verification.md`.
+- Reviewer timeline or `/context-analyze` change (`src/analysis.ts`, `src/tui/timeline.ts`, `src/tui/descendants.ts`, `src/tui/client.ts`): `architecture.md` (Reviewer timeline) → `invariants.md` → source → `verification.md`.
 - Terminal UI change (`src/tui/*`): `architecture.md` → `opencode-v2-platform.md` → source → `verification.md`.
 - OpenCode version bump or plugin API change: `opencode-v2-platform.md` → `verification.md` → source.
 - Tests, E2E or CI only: `verification.md` → the test or workflow file.

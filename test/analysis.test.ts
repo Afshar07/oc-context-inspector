@@ -8,6 +8,8 @@ import {
   buildSessionPrompt,
   extractOutline,
   formatTimeline,
+  readKey,
+  summarizeTimeline,
   toSections,
 } from "../src/analysis.js";
 import { CoverageService, summarize } from "../src/coverage.js";
@@ -139,7 +141,7 @@ describe("prompt builders", () => {
       { at: "2026-01-01T10:00:03.000Z", sessionID: "kid", agentID: "explore", kind: ETimelineKind.Tool, tool: "grep", status: "completed" },
       { at: "2026-01-01T10:00:04.000Z", sessionID: "lead", kind: ETimelineKind.Shell, command: "npm test", exit: 1 },
     ];
-    const reads = new Map([["c1", { ...rec("lead", "AGENTS.md"), delivered: { source: EDeliverySource.Header, lineCount: 20, range: { start: 1, end: 20 }, reachedEof: false } }]]);
+    const reads = new Map([[readKey("lead", "c1"), { ...rec("lead", "AGENTS.md"), delivered: { source: EDeliverySource.Header, lineCount: 20, range: { start: 1, end: 20 }, reachedEof: false } }]]);
     const hidden = formatTimeline(events, { sessionID: "lead", reads, omitted: 4, includeCommands: false });
     expect(hidden.split("\n")).toEqual([
       "(4 earlier low-value steps omitted to fit)",
@@ -151,6 +153,65 @@ describe("prompt builders", () => {
     ]);
     expect(formatTimeline(events, { sessionID: "lead", reads, omitted: 0, includeCommands: true })).toContain("shell command (exit 1): npm test");
     expect(buildSessionPrompt({ task: [], files: [], timeline: hidden })).toContain("10:00:02 [lead] edit a.ts FAILED");
+  });
+
+  describe("read records keyed by (session, call id)", () => {
+    const delivered = (start: number, end: number) => ({ source: EDeliverySource.Header, lineCount: end - start + 1, range: { start, end }, reachedEof: false });
+    const readOf = (sessionID: string, callID: string, start: number, end: number): IContextReadRecord => ({
+      ...rec(sessionID, "AGENTS.md"),
+      callID,
+      delivered: delivered(start, end),
+    });
+    const toolStep = (sessionID: string, callID: string | undefined, sec: number, agentID?: string): ITimelineEvent => ({
+      at: `2026-01-01T10:00:0${sec}.000Z`,
+      sessionID,
+      ...(agentID !== undefined && { agentID }),
+      kind: ETimelineKind.Tool,
+      tool: "read",
+      status: "completed",
+      path: "AGENTS.md",
+      ...(callID !== undefined && { callID }),
+    });
+
+    it("does not let lead and subagents sharing a call id overwrite or misattribute each other", () => {
+      const reads = new Map([
+        [readKey("lead", "call_1"), readOf("lead", "call_1", 1, 10)],
+        [readKey("kid-a", "call_1"), readOf("kid-a", "call_1", 1, 20)],
+        [readKey("kid-b", "call_1"), readOf("kid-b", "call_1", 5, 30)],
+      ]);
+      const events = [toolStep("lead", "call_1", 1), toolStep("kid-a", "call_1", 2, "explore"), toolStep("kid-b", "call_1", 3, "review")];
+      expect(formatTimeline(events, { sessionID: "lead", reads, omitted: 0, includeCommands: false }).split("\n")).toEqual([
+        "10:00:01 [lead] read AGENTS.md L1–10 delivered",
+        "10:00:02 [subagent explore] read AGENTS.md L1–20 delivered",
+        "10:00:03 [subagent review] read AGENTS.md L5–30 delivered",
+      ]);
+      expect(summarizeTimeline(events, reads, false)).toContain("3 of 3 recorded context reads matched to a step");
+    });
+
+    it("leaves steps without a call id, with an unknown one, or with another session's id as plain tool lines", () => {
+      const reads = new Map([[readKey("lead", "call_1"), readOf("lead", "call_1", 1, 10)]]);
+      const events = [toolStep("lead", undefined, 1), toolStep("lead", "other", 2), toolStep("kid", "call_1", 3, "explore")];
+      expect(formatTimeline(events, { sessionID: "lead", reads, omitted: 0, includeCommands: false }).split("\n")).toEqual([
+        "10:00:01 [lead] read AGENTS.md",
+        "10:00:02 [lead] read AGENTS.md",
+        "10:00:03 [subagent explore] read AGENTS.md",
+      ]);
+      expect(summarizeTimeline(events, reads, false)).toContain("0 of 1 recorded context reads matched to a step");
+    });
+
+    it("joins each session's own record file, skips records with no call id, and keeps both reads", () =>
+      withTempDir(async (dir) => {
+        const { service, prompts } = await setup(dir, false);
+        const store = new JsonlContextReadStore(path.join(dir, ".opencode/context-inspector"));
+        await store.append(readOf("lead", "call_1", 1, 10));
+        await store.append(readOf("kid", "call_1", 1, 7));
+        await store.append({ ...readOf("kid", "", 1, 3) });
+        const timeline = { omitted: 0, events: [toolStep("lead", "call_1", 1), toolStep("kid", "call_1", 2, "explore")] };
+        const answer = await service.analyzeSession("lead", ["t"], undefined, timeline);
+        expect(prompts[0]).toContain("[lead] read AGENTS.md L1–10 delivered");
+        expect(prompts[0]).toContain("[subagent explore] read AGENTS.md L1–7 delivered");
+        expect(answer).toContain("2 of 2 recorded context reads matched to a step");
+      }));
   });
 
   it("gives the project prompt usage ratios per file and section", () => {

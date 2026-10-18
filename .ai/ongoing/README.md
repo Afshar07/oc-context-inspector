@@ -7,7 +7,7 @@ instructions.
 
 | Task | Read when you're... |
 | --- | --- |
-| `reviewer-timeline-and-categories.md` | improving the post-session reviewer: action timeline, finding categories, causal chain, remedy taxonomy |
+| `timeline-live-verification.md` | doing the interactive `/context-analyze` check of the reviewer timeline and subagent discovery |
 
 Move durable conventions into the appropriate focused context document when a
 task finishes, then remove its ongoing-task entry and task document.

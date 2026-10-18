@@ -8,6 +8,7 @@ import {
   ESessionTracking,
   EReadStatus,
   ETimelineKind,
+  ETimelineSessionState,
   type IAgentReadSummary,
   type IContextReadRecord,
   type IFileCoverage,
@@ -15,6 +16,7 @@ import {
   type IModelRef,
   type ISessionObservation,
   type ITimelineEvent,
+  type ITimelineSessionInfo,
 } from "./types.js";
 
 const MAX_TASK_CHARS = 4_000;
@@ -258,17 +260,32 @@ function describeAgent(a: IAgentReadSummary): string {
   return `${a.agentID ?? "unknown agent"} (${a.role}${a.depth > 0 ? `, depth ${a.depth}` : ""}): ${a.readCount} reads${notes.length > 0 ? ` [${notes.join(", ")}]` : ""}`;
 }
 
+/** The TUI's timeline as the model analysis takes it. */
+export interface IAnalysisTimeline {
+  readonly events: readonly ITimelineEvent[];
+  readonly omitted?: number;
+  /** Absent from older TUIs: the roster then falls back to the sessions seen in `events`. */
+  readonly sessions?: readonly ITimelineSessionInfo[];
+}
+
 /** What `formatTimeline` needs besides the events. */
 export interface ITimelineRender {
   /** The session being analyzed; every other session in the events is one of its subagents. */
   readonly sessionID: string;
-  /** Context-read records by tool call id, so a read shows what it delivered. */
+  /** Context-read records by `readKey(sessionID, callID)`, so a read shows what it delivered. Call ids repeat across sessions. */
   readonly reads: ReadonlyMap<string, IContextReadRecord>;
+  /** Every session the TUI found, including those with no steps or whose messages could not be loaded. */
+  readonly sessions?: readonly ITimelineSessionInfo[];
   /** Events the TUI dropped to stay within its cap. */
   readonly omitted: number;
   /** Shell commands may hold secrets: they are shown only when file contents may be sent too. */
   readonly includeCommands: boolean;
 }
+
+/** Key of a read record: tool call ids are only unique within a session, so lead and subagents can share one. */
+export const readKey = (sessionID: string, callID: string): string => JSON.stringify([sessionID, callID]);
+
+const eventReadKey = (e: ITimelineEvent): string | undefined => (e.callID !== undefined ? readKey(e.sessionID, e.callID) : undefined);
 
 function describeRead(r: IContextReadRecord): string {
   if (r.status === EReadStatus.Error) return `read ${r.filePath} FAILED${r.errorMessage ? `: ${r.errorMessage}` : ""}`;
@@ -277,6 +294,23 @@ function describeRead(r: IContextReadRecord): string {
   if (r.delivered) return `read ${r.filePath} delivered 0 lines`;
   const { offset, limit } = r.requestedRange;
   return `read ${r.filePath} (estimated: requested ${offset !== undefined || limit !== undefined ? `offset ${offset ?? 1}, limit ${limit ?? "all"}` : "whole file"})`;
+}
+
+/** Subagent sessions that exist, with those whose steps are absent from the timeline and why. */
+function describeSessions(sessions: readonly ITimelineSessionInfo[], leadID: string): string[] {
+  const subs = sessions.filter((x) => x.sessionID !== leadID);
+  const rootNote = sessions.find((x) => x.sessionID === leadID)?.reason;
+  if (subs.length === 0 && !rootNote) return [];
+  return [
+    "Sessions:",
+    ...(rootNote ? [`- lead: ${rootNote}`] : []),
+    ...subs.map((x) => {
+      const name = `subagent ${x.agentID ?? x.sessionID}`;
+      const nested = x.depth > 1 ? `, depth ${x.depth}` : "";
+      if (x.state === ETimelineSessionState.Unavailable) return `- ${name}${nested}: messages unavailable${x.reason ? ` (${x.reason})` : ""}; its steps are NOT in this timeline`;
+      return `- ${name}${nested}: ${x.messages} message${x.messages === 1 ? "" : "s"}${x.reason ? ` (${x.reason})` : ""}`;
+    }),
+  ];
 }
 
 /** One line per step, in order; context reads are shown with what the tool returned. */
@@ -297,13 +331,16 @@ export function formatTimeline(events: readonly ITimelineEvent[], render: ITimel
         return `${prefix} shell command (${outcome})${render.includeCommands && e.command ? `: ${e.command}` : ""}`;
       }
       case ETimelineKind.Tool: {
-        const record = e.callID !== undefined ? render.reads.get(e.callID) : undefined;
+        const key = eventReadKey(e);
+        const record = key !== undefined ? render.reads.get(key) : undefined;
         if (record) return `${prefix} ${describeRead(record)}`;
         const outcome = e.status === "error" ? ` FAILED${e.text ? `: ${e.text}` : ""}` : "";
         return `${prefix} ${e.tool ?? "tool"}${e.path ? ` ${e.path}` : ""}${outcome}`;
       }
     }
   });
+  const roster = describeSessions(render.sessions ?? [], render.sessionID);
+  if (roster.length > 0) lines.unshift(...roster);
   if (render.omitted > 0) lines.unshift(`(${render.omitted} earlier low-value steps omitted to fit)`);
   return lines.join("\n");
 }
@@ -313,15 +350,18 @@ export function summarizeTimeline(
   events: readonly ITimelineEvent[],
   reads: ReadonlyMap<string, IContextReadRecord>,
   includeCommands: boolean,
+  sessions: readonly ITimelineSessionInfo[] = [],
 ): string {
   const count = (pred: (e: ITimelineEvent) => boolean) => events.filter(pred).length;
   const shells = events.filter((e) => e.kind === ETimelineKind.Shell);
-  const subagent = new Set(events.map((e) => e.sessionID)).size - 1;
-  const matched = new Set(events.flatMap((e) => (e.callID !== undefined && reads.has(e.callID) ? [e.callID] : []))).size;
+  const known = new Set([...events.map((e) => e.sessionID), ...sessions.map((x) => x.sessionID)]);
+  const subagent = Math.max(0, known.size - 1);
+  const matched = new Set(events.flatMap((e) => eventReadKey(e) ?? []).filter((key) => reads.has(key))).size;
+  const missing = sessions.filter((x) => x.state === ETimelineSessionState.Unavailable).length;
   return [
     `Timeline: ${events.length} steps`,
     `${count((e) => e.kind === ETimelineKind.User)} user, ${count((e) => e.kind === ETimelineKind.Tool)} tool, ${shells.length} shell (${shells.filter((e) => e.exit !== undefined).length} with exit code)`,
-    `${subagent} subagent session${subagent === 1 ? "" : "s"}`,
+    `${subagent} subagent session${subagent === 1 ? "" : "s"}${missing > 0 ? ` (${missing} without messages)` : ""}`,
     `${matched} of ${reads.size} recorded context reads matched to a step`,
     includeCommands ? "commands shown" : "commands hidden",
   ].join(" · ");
@@ -472,7 +512,7 @@ export class AnalysisService {
     sessionID: string,
     task: readonly string[],
     model?: IModelRef,
-    timeline?: { readonly events: readonly ITimelineEvent[]; readonly omitted?: number },
+    timeline?: IAnalysisTimeline,
   ): Promise<string> {
     const report = await this.coverage.coverage(sessionID);
     if (report.files.length === 0) return "No context files in this project; nothing to analyze.";
@@ -489,7 +529,7 @@ export class AnalysisService {
       sections: toSections(extractOutline(lines ?? []), lines?.length ?? 0),
       content: this.options.includeContent && lines ? budget.take(lines.join("\n")) : undefined,
     }));
-    const rendered = timeline && timeline.events.length > 0 ? await this.renderTimeline(sessionID, timeline) : undefined;
+    const rendered = timeline && (timeline.events.length > 0 || (timeline.sessions?.length ?? 0) > 1) ? await this.renderTimeline(sessionID, timeline) : undefined;
     const answer = await this.generate(
       buildSessionPrompt({ task, files, ...(rendered !== undefined && { timeline: rendered.text }) }),
       model,
@@ -503,16 +543,20 @@ _${rendered?.summary ?? "Timeline: unavailable, so the review cannot judge order
 
   private async renderTimeline(
     sessionID: string,
-    timeline: { readonly events: readonly ITimelineEvent[]; readonly omitted?: number },
+    timeline: IAnalysisTimeline,
   ): Promise<{ readonly text: string; readonly summary: string }> {
     const reads = new Map<string, IContextReadRecord>();
-    for (const id of new Set(timeline.events.map((e) => e.sessionID))) {
-      for (const record of await readSessionRecords(this.dataDir, id).catch(() => [])) reads.set(record.callID, record);
+    const sessions = timeline.sessions ?? [];
+    for (const id of new Set([...timeline.events.map((e) => e.sessionID), ...sessions.map((x) => x.sessionID)])) {
+      // Keyed by the file's session, not the record's own field: call ids repeat across sessions.
+      for (const record of await readSessionRecords(this.dataDir, id).catch(() => [])) {
+        if (typeof record.callID === "string" && record.callID !== "") reads.set(readKey(id, record.callID), record);
+      }
     }
     const includeCommands = this.options.includeContent;
     return {
-      text: formatTimeline(timeline.events, { sessionID, reads, omitted: timeline.omitted ?? 0, includeCommands }),
-      summary: summarizeTimeline(timeline.events, reads, includeCommands),
+      text: formatTimeline(timeline.events, { sessionID, reads, omitted: timeline.omitted ?? 0, includeCommands, sessions }),
+      summary: summarizeTimeline(timeline.events, reads, includeCommands, sessions),
     };
   }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end test: a real OpenCode V2 binary runs five scripted sessions concurrently against a copy of
+# End-to-end test: a real OpenCode V2 binary runs six scripted sessions concurrently against a copy of
 # e2e/project with this plugin loaded, then the recorded data is asserted. Only the LLM is scripted
 # (e2e/mock-llm.mjs), so no model credentials are needed.
 #
@@ -74,7 +74,7 @@ done
 grep -q "mock llm on" "$LOGS/mock.log" || { echo "e2e: mock LLM did not start in time" >&2; exit 1; }
 
 # Each session gets its own OpenCode state, so only the plugin's data directory is shared between them.
-SESSIONS=(A B C D E)
+SESSIONS=(A B C D E F)
 run_session() {
   local name="$1" state="$SANDBOX/state-$1"
   mkdir -p "$state"

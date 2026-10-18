@@ -70,16 +70,16 @@ describe.skipIf(!projectDir)("data recorded by a real OpenCode run", () => {
     expect((await file("S", "AGENTS.md")).agents.map((a) => a.depth)).toEqual([0]);
   });
 
-  it("counts all six observed sessions, including the one that read nothing", async () => {
+  it("counts all eight observed sessions, including those that read no context", async () => {
     const prompts: string[] = [];
     const service = new AnalysisService(coverage(), dataDir, async (p) => (prompts.push(p), "ANSWER"), { includeContent: false });
-    expect(await service.reviewProject()).toMatchObject({ sessionCount: 6, readsOnlySessions: 0 });
+    expect(await service.reviewProject()).toMatchObject({ sessionCount: 8, readsOnlySessions: 0 });
     const prompt = prompts[0]!;
-    expect(prompt).toMatch(/AGENTS\.md — read in 3\/6 sessions \(lead 2\/5 · subagent 1\/1\)/);
-    expect(prompt).toMatch(/\.ai\/architecture\.md — read in 2\/6 sessions/);
-    expect(prompt).toMatch(/\.ai\/style\.md — read in 2\/6 sessions/);
-    expect(prompt).toContain("6 sessions: 5 lead, 1 subagent");
-    expect(prompt).toContain("6 were observed running");
+    expect(prompt).toMatch(/AGENTS\.md — read in 3\/8 sessions \(lead 2\/6 · subagent 1\/2\)/);
+    expect(prompt).toMatch(/\.ai\/architecture\.md — read in 2\/8 sessions/);
+    expect(prompt).toMatch(/\.ai\/style\.md — read in 2\/8 sessions/);
+    expect(prompt).toContain("8 sessions: 6 lead, 2 subagent");
+    expect(prompt).toContain("8 were observed running");
   });
 
   it("knows a session it never saw is unobserved", async () => {

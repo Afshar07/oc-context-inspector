@@ -6,9 +6,11 @@ import {
   ECoverageStatus,
   ESessionTracking,
   ETimelineKind,
+  ETimelineSessionState,
   type ICoverageReport,
   type IFilePreview,
   type ITimelineEvent,
+  type ITimelineSessionInfo,
 } from "./types.js";
 
 /** RPC methods/events need Standard Schema on both ends; Effect schemas provide it. */
@@ -74,6 +76,16 @@ const TimelineEvent = Schema.Struct({
   exit: Schema.optionalKey(Schema.Number),
 });
 
+const TimelineSession = Schema.Struct({
+  sessionID: Schema.String,
+  parentID: Schema.optionalKey(Schema.String),
+  agentID: Schema.optionalKey(Schema.String),
+  depth: Schema.Number,
+  state: Schema.Enum(ETimelineSessionState),
+  messages: Schema.Number,
+  reason: Schema.optionalKey(Schema.String),
+});
+
 const Failure = Schema.Struct({ ok: Schema.Literal(false), error: Schema.String });
 
 // Compile-time guard that the wire schemas and the domain types stay in step.
@@ -84,6 +96,8 @@ sameShape<IFilePreview, (typeof FilePreview)["Type"]>((a) => a);
 sameShape<(typeof FilePreview)["Type"], IFilePreview>((a) => a);
 sameShape<ITimelineEvent, (typeof TimelineEvent)["Type"]>((a) => a);
 sameShape<(typeof TimelineEvent)["Type"], ITimelineEvent>((a) => a);
+sameShape<ITimelineSessionInfo, (typeof TimelineSession)["Type"]>((a) => a);
+sameShape<(typeof TimelineSession)["Type"], ITimelineSessionInfo>((a) => a);
 
 /** Shared by the server entry (registers handlers) and the TUI entry (calls them). */
 export const ContextInspectorRpc = Rpc.define({
@@ -102,7 +116,11 @@ export const ContextInspectorRpc = Rpc.define({
           task: Schema.Array(Schema.String),
           model: Schema.optionalKey(Schema.String),
           // Steps of the session and its subagents, built by the TUI; absent from older TUIs.
-          timeline: Schema.optionalKey(Schema.Struct({ events: Schema.Array(TimelineEvent), omitted: Schema.Number })),
+          timeline: Schema.optionalKey(Schema.Struct({
+              events: Schema.Array(TimelineEvent),
+              omitted: Schema.Number,
+              sessions: Schema.optionalKey(Schema.Array(TimelineSession)),
+            })),
         }),
       ),
       output: portable(

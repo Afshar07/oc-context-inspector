@@ -99,9 +99,11 @@ the conversation and do not change it.
 
 * `/context-analyze`: **this session.** Did the agent read the context its task needed, what did it skip, and which
   reads look irrelevant? The task is the session's user messages. Reads by subagents are listed per agent. The model
-  also gets a **timeline** of the session and its subagents (user messages, tool calls with their status, file paths,
-  shell exit codes, and what each context read delivered), built from OpenCode's own message log: nothing extra is
-  recorded. Each finding is labelled `context-discovery` (guidance not loaded), `instruction-adherence` (loaded but
+  also gets a **timeline** of the session and every subagent it delegated to, nested ones included (user messages,
+  tool calls with their status, file paths, shell exit codes, and what each context read delivered), built from
+  OpenCode's own message log: nothing extra is recorded. Subagents are found through OpenCode's session listing, so
+  one that never read a context file still appears; one whose messages cannot be loaded is listed as unavailable, never
+  dropped. Each finding is labelled `context-discovery` (guidance not loaded), `instruction-adherence` (loaded but
   not followed) or `verification-reporting` (claims beyond the evidence), with the triggering action, the quoted
   instruction, whether it was already loaded before that action, a confidence and a remedy. Server and TUI update
   together; an older TUI sends no timeline and the review then says ordering is unknown.
@@ -203,8 +205,8 @@ fields (`tracking`, `certainty`, `agents`, …), so update the server and TUI ha
 
 ## E2E test
 
-`e2e/run.sh /path/to/opencode2` runs five real `opencode run` sessions concurrently (plus the subagent one of them
-spawns) against a copy of `e2e/project` with the plugin loaded, then asserts what was recorded (`e2e/assert.mjs`, then
+`e2e/run.sh /path/to/opencode2` runs six real `opencode run` sessions concurrently (plus the two subagent ones they
+spawn) against a copy of `e2e/project` with the plugin loaded, then asserts what was recorded (`e2e/assert.mjs`, then
 `test/e2e-output.test.ts` for coverage and analysis on the real data). It exits nonzero if a session fails to run or any
 assertion fails, and always removes its temporary directory (`E2E_KEEP=1` keeps it for inspection). It picks a free port
 and gives every session its own OpenCode state. OpenCode, its `read` tool, subagent delegation and the plugin loader are
@@ -217,8 +219,10 @@ real; **only the LLM is a scripted OpenAI-compatible stub** (`e2e/mock-llm.mjs`)
 | C | empty file, offset past the end, a 2500-line file whole / last page / offset 0 | empty file, failed read, delivered range beyond the 2000-line page |
 | D | answers without any tool call | a zero-read session is still observed |
 | E → S | E delegates to a subagent, which reads | subagent attribution, `parentSessionID`, original call IDs |
+| F → N | F delegates to a subagent that reads only a non-context file | a subagent with zero context reads is still an observed child of its spawner |
 
-Limitations: OpenCode's stock subagents cannot spawn further agents, so nested delegation is covered by unit tests
+Limitations: the E2E does not drive the terminal UI, so the child-session discovery used by `/context-analyze`
+(`session.list({ parentID })`) is covered by unit tests with a fake listing, not live. OpenCode's stock subagents cannot spawn further agents, so nested delegation is covered by unit tests
 only. The terminal UI is covered by unit tests of its formatting and data logic, not by the E2E.
 
 CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck and unit tests, then this E2E on Linux against the pinned

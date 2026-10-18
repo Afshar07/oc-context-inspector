@@ -22,13 +22,14 @@ Run typecheck and tests for any change in `src/`. Run a single file with `npx vi
 | Model prompts, content budget | `analysis.test.ts`, `project-analysis.test.ts` |
 | RPC | `rpc.test.ts` |
 | TUI logic | `tui.test.ts`, `tui-coverage.test.ts`, `markdown.test.ts`, `handoff.test.ts` |
+| Timeline, descendant-session discovery | `timeline.test.ts`, `descendants.test.ts`; read-key joining in `analysis.test.ts` |
 | Real E2E output | `e2e-output.test.ts` (reads data produced by `e2e/run.sh`) |
 
 Helpers in `test/helpers.ts`: `MemoryStore`, `StepClock` (deterministic timestamps), `makeTracker`, `withTempDir`. Prefer them over new fakes; the code takes collaborators through constructors (`IContextReadStore`, `IClock`, injected `Generate`, `ITrackerDeps`) so tests need no mocking framework.
 
 ## E2E
 
-`e2e/run.sh` copies `e2e/project`, runs five concurrent `opencode run` sessions (A-E plus the subagent S) against a free port with isolated OpenCode state, then runs `e2e/assert.mjs` and `test/e2e-output.test.ts`. Only the LLM is faked (`e2e/mock-llm.mjs`, OpenAI-compatible stub). `E2E_KEEP=1` keeps the temp dir. The scenario table lives in the root `README.md`; extend both when adding a scenario.
+`e2e/run.sh` copies `e2e/project`, runs six concurrent `opencode run` sessions (A-F plus the subagents S and N) against a free port with isolated OpenCode state, then runs `e2e/assert.mjs` and `test/e2e-output.test.ts`. Only the LLM is faked (`e2e/mock-llm.mjs`, OpenAI-compatible stub). `E2E_KEEP=1` keeps the temp dir. The scenario table lives in the root `README.md`; extend both when adding a scenario.
 
 ## CI
 

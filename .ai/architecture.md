@@ -29,7 +29,7 @@ Both halves share `id: "opencode-context-inspector"` and `src/types.ts`. Update 
 
 ## TUI modules (`src/tui/`)
 
-`index.tsx` registers slots (`sidebar.content`, `session.panel`, `app`) and keymap layers (commands plus browse mode). `client.ts` wraps the RPC and the follow-up-session creation. `source.ts` is the data hook/resource layer. `format.ts`, `markdown-parse.ts` and `handoff.ts` are pure logic (unit-tested); `Sidebar`, `Preview`, `Analysis`, `AnswerMarkdown` are Solid components.
+`timeline.ts` and `descendants.ts` build the reviewer timeline (below). `index.tsx` registers slots (`sidebar.content`, `session.panel`, `app`) and keymap layers (commands plus browse mode). `client.ts` wraps the RPC and the follow-up-session creation. `source.ts` is the data hook/resource layer. `format.ts`, `markdown-parse.ts` and `handoff.ts` are pure logic (unit-tested); `Sidebar`, `Preview`, `Analysis`, `AnswerMarkdown` are Solid components.
 
 ## Data flow
 
@@ -37,6 +37,14 @@ Both halves share `id: "opencode-context-inspector"` and `src/types.ts`. Update 
 2. `execute.before` stats the file (fingerprint) and stores pending state keyed by session then call id.
 3. `execute.after` builds the record (delivered range, fingerprint, lineage) and appends it to `<dataDir>/<sessionID>.jsonl`, then emits a `read` event (with `ancestors`) so lead-session sidebars refresh when a subagent reads.
 4. The TUI calls `coverage`/`preview`/`analyzeSession`/`reviewProject`; the server computes from the JSONL and the live file system on demand. Nothing derived is persisted.
+
+## Reviewer timeline (`/context-analyze`)
+
+- **Derived in the TUI, never recorded.** `client.ts` `sessionTimeline` reads OpenCode's own message log (`ctx.data.session.message`) and sends the result as the optional `timeline` field of the `analyzeSession` RPC (`events`, `omitted`, `sessions`). No hook, no on-disk file, no change to `IContextReadRecord`; old sessions work.
+- **Subagents come from OpenCode's session listing, not from context reads.** `descendants.ts` `discoverSessions` walks `ctx.client.session.list({ parentID })` breadth-first (all pages, nested delegation, each session once, bounded by `MAX_DESCENDANT_SESSIONS`/`DEPTH`), then adds sessions the coverage report names that the listing missed. So subagents that only edit, run tests or answer still appear. A session whose messages fail to sync stays in `sessions` as `unavailable` with a reason; the prompt says its steps are missing.
+- **Reads join the timeline by `(sessionID, callID)`.** Call ids are unique only within a session, so `analysis.ts` keys records with `readKey`, taken from the record file's session. A step without a call id, or with no record, stays a plain tool line.
+- **Prompt contract** (`buildSessionPrompt` in `analysis.ts`): ordered timeline with reads inlined, then findings with one category (`context-discovery`, `instruction-adherence`, `verification-reporting`), evidence, triggering action, quoted instruction, before-the-action, confidence (`confirmed` needs the quote and the ordering) and one remedy (`agent-oversight`, `ambiguous-routing`, `missing-documentation`, `tracking-limitation`). A clear instruction is never a documentation remedy. Without a timeline the prompt says ordering is unknown. The answer ends with a one-line summary of what reached the model.
+- Event caps (300, essential events kept) live in `timeline.ts`; the follow-up handoff is unchanged by the timeline.
 
 ## On-disk layout (`<project>/.opencode/context-inspector/`, git-ignored)
 

@@ -13,6 +13,8 @@ Contracts a change must not break unless the task explicitly changes them. Each 
 - Records hold metadata only (paths, ranges, counts, status, error message truncated to 200 chars). File contents are never written anywhere; previews read the live file on demand.
 - Analysis sends metadata plus heading outlines. Contents go to the model provider only when `analysis.includeContent` is on, capped at 8,000 chars per file and 40,000 total (`ContentBudget`). Unread files reach the provider when it is on, so keep it opt-in.
 
+- The reviewer timeline copies primitives only (tool name, status, project-relative path, truncated error text, exit code). Tool inputs and results, which can carry file contents, are never copied, and the timeline is never persisted. Shell command text reaches the provider only with `analysis.includeContent`, because it may hold secrets and is the only way to tell a test run apart. **Why:** same rule as file contents.
+
 ## Never guess
 
 - Lineage (lead/subagent) comes from `session.get().parentID`; if the lookup failed it stays absent.
@@ -26,6 +28,9 @@ Contracts a change must not break unless the task explicitly changes them. Each 
 - A session's status counts only its own reads. Subagent reads are listed per agent (`+N sub`) and do not change the lead's status. **Why:** the lead's context holds only what the lead received.
 - Repeats are split: *by itself* (same agent re-read) versus *after handoff* (another agent already received those lines).
 - Sessions known only from pre-tracking read records are `reads-only`; reviews must state that their ratios are overstated.
+
+- Tool call ids repeat across sessions (lead and subagents). A read record is identified by `(sessionID, callID)`, never `callID` alone. **Why:** a single-key map let one agent's record overwrite another's and misattributed delivered ranges.
+- A session the timeline knows but could not load is reported as unavailable, never silently omitted; the review must not infer that it did nothing.
 
 ## Determinism
 

@@ -32,6 +32,9 @@ const SCRIPTS = {
     ["read", { path: "AGENTS.md" }],
     ["read", { path: ".ai/architecture.md", offset: 1, limit: 10 }],
   ],
+  // Delegates to a subagent that never reads a context file (SCENARIO-N): it must still be discoverable as a child session.
+  "SCENARIO-F": [["subagent", { agent: "general", description: "Inspect source", prompt: "SCENARIO-N inspect the source" }]],
+  "SCENARIO-N": [["read", { path: "src/app.ts" }]],
   "SCENARIO-B": [
     ["read", { path: ".ai/style.md", limit: 5 }],
     ["read", { path: "AGENTS.md", offset: 2 }],

@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode/plugin/tui";
 import { parseModelRef } from "../model-ref.js";
 import { ContextInspectorRpc } from "../rpc.js";
 import type { ICoverageClient } from "./source.js";
+import { discoverSessions, type ISessionNode } from "./descendants.js";
 import { buildTimeline } from "./timeline.js";
 
 /**
@@ -76,23 +77,41 @@ export async function userPrompts(ctx: Plugin.Context, sessionID: string): Promi
     .flatMap((message) => (message.type === "user" && message.text.trim() !== "" ? [message.text] : []));
 }
 
+/** Direct children of a session, all pages, through OpenCode's session listing. */
+async function listChildSessions(ctx: Plugin.Context, parentID: string): Promise<ISessionNode[]> {
+  const found: ISessionNode[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await ctx.client.session.list({ parentID, order: "asc", limit: 100, ...(cursor && { cursor }) });
+    for (const s of page.data) found.push({ id: s.id, ...(s.parentID && { parentID: s.parentID }), ...(s.agent && { agent: s.agent }) });
+    cursor = page.data.length > 0 ? (page.cursor.next ?? undefined) : undefined;
+  } while (cursor !== undefined);
+  return found;
+}
+
 /**
- * The steps of the session and of the sessions it spawned, from OpenCode's own message log.
- * Undefined when nothing could be loaded: the review then says ordering is unknown.
+ * The steps of the session and of every session it delegated to, from OpenCode's own message log.
+ * Subagents are found through the session listing, not through context reads. Undefined when nothing
+ * could be loaded: the review then says ordering is unknown.
  */
 async function sessionTimeline(ctx: Plugin.Context, client: ICoverageClient, sessionID: string) {
   const directory = ctx.data.session.get(sessionID)?.location.directory;
   if (!directory) return undefined;
   const report = await client.coverage(sessionID).catch(() => undefined);
-  const ids = [sessionID, ...new Set((report?.files ?? []).flatMap((f) => f.agents.map((a) => a.sessionID)).filter((id) => id !== sessionID))];
-  const sessions = await Promise.all(
-    ids.map(async (id) => {
-      await ctx.data.session.message.sync(id).catch(() => {});
-      return { sessionID: id, messages: ctx.data.session.message.list(id) as readonly unknown[] };
-    }),
+  const known = (report?.files ?? []).flatMap((f) => f.agents).filter((a) => a.sessionID !== sessionID);
+  const { sessions, roster } = await discoverSessions(
+    sessionID,
+    {
+      listChildren: (parentID) => listChildSessions(ctx, parentID),
+      loadMessages: async (id) => {
+        await ctx.data.session.message.sync(id);
+        return ctx.data.session.message.list(id) as readonly unknown[];
+      },
+    },
+    known,
   );
   const { events, omitted } = buildTimeline(sessions, directory);
-  return events.length > 0 ? { events, omitted } : undefined;
+  return events.length > 0 || roster.length > 1 ? { events, omitted, sessions: roster } : undefined;
 }
 
 /** Calls the server half over RPC, routed to the server instance that owns the session's project. */
