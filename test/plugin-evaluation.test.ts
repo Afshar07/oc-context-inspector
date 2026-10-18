@@ -151,7 +151,7 @@ describe("plugin experiment RPC", () => {
 
       const evaluated = await h.evaluateExperiment!({ id });
       expect(evaluated.ok).toBe(true);
-      expect(evaluated.result.verdict).toMatchObject({ verdict: EVerdict.Improved, improved: ["discovery.explicit-read"] });
+      expect(evaluated.result.verdict).toMatchObject({ verdict: EVerdict.Inconclusive, discovery: EVerdict.Improved, improved: ["discovery.explicit-read"] });
 
       const listed = await h.listExperiments!({});
       expect(listed.experiments).toHaveLength(1);

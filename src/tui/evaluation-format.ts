@@ -73,7 +73,14 @@ const EXCLUSION_LABEL: Readonly<Record<EExclusionReason, string>> = {
   [EExclusionReason.RevisionMismatch]: "ran under another revision",
   [EExclusionReason.OtherContextDiffers]: "other context files differ",
   [EExclusionReason.NoCandidate]: "no candidate revision yet",
+  [EExclusionReason.RecordsUnreadable]: "read records unreadable",
 };
+
+/** The two verdicts on one line, or the single legacy verdict of a result stored before they were separated. */
+export function verdictSummary(verdict: IEvaluationResult["verdict"]): string {
+  if (verdict.discovery === undefined) return VERDICT_LABEL[verdict.verdict];
+  return `discovery ${VERDICT_LABEL[verdict.discovery]} · task effectiveness ${verdict.verdict === EVerdict.Inconclusive ? "unknown" : VERDICT_LABEL[verdict.verdict]}`;
+}
 
 export const FIT_LABEL: Readonly<Record<ESessionFit, string>> = {
   [ESessionFit.Baseline]: "baseline revision",
@@ -166,7 +173,7 @@ export function experimentLines(experiment: IExperiment): IViewLine[] {
   const last = experiment.evaluations[experiment.evaluations.length - 1];
   if (last) {
     lines.push({
-      text: `Last evaluation ${last.evaluatedAt.slice(0, 16).replace("T", " ")}: ${VERDICT_LABEL[last.verdict.verdict]} (${experiment.evaluations.length} stored)`,
+      text: `Last evaluation ${last.evaluatedAt.slice(0, 16).replace("T", " ")}: ${verdictSummary(last.verdict)} (${experiment.evaluations.length} stored)`,
       tone: verdictTone(last.verdict.verdict),
     });
   }
@@ -174,7 +181,7 @@ export function experimentLines(experiment: IExperiment): IViewLine[] {
 }
 
 const SECTION_TITLES: Readonly<Record<string, string>> = {
-  discovery: "Context discovery",
+  discovery: "Context discovery (did agents read the files? not whether they did better)",
   efficiency: "Context-reading efficiency (signals, no verdict)",
   verification: "Verification evidence (signals, no verdict)",
   outcome: "Human-labeled outcomes",
@@ -210,18 +217,21 @@ export function evaluationLines(result: IEvaluationResult, experiment: IExperime
   });
 
   const { verdict } = result;
-  const listed = verdict.verdict === EVerdict.Improved ? verdict.improved : verdict.verdict === EVerdict.Regressed ? verdict.regressed : [];
   const names = (ids: readonly string[]) => ids.map((id) => result.metrics.find((m) => m.id === id)?.label ?? id).join("; ");
   lines.push({ text: "" });
-  lines.push({
-    text: `Verdict: ${VERDICT_LABEL[verdict.verdict]}${listed.length > 0 ? ` — ${names(listed)}` : ""}`,
-    tone: verdictTone(verdict.verdict),
-    bold: true,
-  });
-  if (verdict.verdict === EVerdict.Inconclusive && (verdict.improved.length > 0 || verdict.regressed.length > 0)) {
-    if (verdict.improved.length > 0) lines.push({ text: `  improved: ${names(verdict.improved)}`, tone: "success" });
-    if (verdict.regressed.length > 0) lines.push({ text: `  regressed: ${names(verdict.regressed)}`, tone: "error" });
+  if (verdict.discovery === undefined) {
+    // Stored before discovery and effectiveness were separated: show it as recorded, with a caution.
+    lines.push({ text: `Verdict: ${VERDICT_LABEL[verdict.verdict]} (older evaluation; discovery and task effectiveness were not separated)`, tone: verdictTone(verdict.verdict), bold: true });
+  } else {
+    lines.push({ text: `Discovery: ${VERDICT_LABEL[verdict.discovery]}`, tone: verdictTone(verdict.discovery), bold: true });
+    lines.push({
+      text: `Task effectiveness: ${verdict.verdict === EVerdict.Inconclusive ? "unknown (inconclusive)" : VERDICT_LABEL[verdict.verdict]}`,
+      tone: verdictTone(verdict.verdict),
+      bold: true,
+    });
   }
+  if (verdict.improved.length > 0) lines.push({ text: `  improved: ${names(verdict.improved)}`, tone: "success" });
+  if (verdict.regressed.length > 0) lines.push({ text: `  regressed: ${names(verdict.regressed)}`, tone: "error" });
   for (const reason of verdict.reasons) lines.push({ text: `  ${reason}`, tone: "muted" });
 
   const baseline = result.groups.filter((g) => g.role === EExperimentRole.Baseline).length;
@@ -259,6 +269,14 @@ export function evaluationLines(result: IEvaluationResult, experiment: IExperime
   lines.push({ text: "" });
   lines.push({ text: "Comparison context", bold: true });
   lines.push({ text: `  models: baseline ${ctx.baselineModels.join(", ") || "unknown"} · candidate ${ctx.candidateModels.join(", ") || "unknown"}`, tone: "muted" });
+  const status = (comparable: boolean | undefined, what: string): IViewLine =>
+    comparable === undefined
+      ? { text: `  ${what}: unknown for at least one session — comparability cannot be confirmed`, tone: "warning" }
+      : comparable
+        ? { text: `  ${what}: same on both sides`, tone: "muted" }
+        : { text: `  ${what}: differ between the sides`, tone: "warning" };
+  lines.push(status(ctx.modelsComparable, "models"), status(ctx.environmentsComparable, "plugin configuration"));
+  for (const role of ctx.missingAnchors ?? []) lines.push({ text: `  ${role} revision snapshot missing or damaged — other context changes cannot be ruled out`, tone: "warning" });
   const changed = diffSummary(ctx.targetChanges);
   if (changed) for (const row of changed.split("\n")) lines.push({ text: `  target change ${row}`, tone: "muted" });
   for (const path of ctx.nonTargetChanges) lines.push({ text: `  other context changed: ${path}`, tone: "warning" });

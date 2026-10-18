@@ -88,7 +88,14 @@ export class EvaluationService {
         continue;
       }
 
-      const records = (await Promise.all(revision.members.map((id) => readSessionRecords(dataDir, id).catch((): IContextReadRecord[] => [])))).flat();
+      // A session with no record file made no reads; one whose file cannot be read is unknown, never zero.
+      let records: IContextReadRecord[];
+      try {
+        records = (await Promise.all(revision.members.map((id) => readSessionRecords(dataDir, id)))).flat();
+      } catch (error) {
+        exclude(EExclusionReason.RecordsUnreadable, error instanceof Error ? error.message.slice(0, 120) : undefined);
+        continue;
+      }
       const sessionActivity = activityOf.get(selection.sessionID);
       measured.push(
         measureGroup({
@@ -114,7 +121,6 @@ export class EvaluationService {
     const context: IComparisonContext = { ...sideContext(baselineGroups, candidateGroups), ...anchors.changes };
     const metrics = compareGroups(baselineGroups, candidateGroups, context, this.settings);
     const limitations = limitationsFor(baselineGroups, candidateGroups, context, exclusions.length, this.settings);
-    if (anchors.unavailable) limitations.push("An anchor revision snapshot is missing or damaged, so changes between the revisions could not be listed.");
     if (!experiment.candidate) limitations.push("No candidate revision is confirmed, so there is nothing to compare against the baseline yet.");
 
     const result: IEvaluationResult = {
@@ -135,14 +141,26 @@ export class EvaluationService {
     return result;
   }
 
+  /**
+   * What differs between the anchor revisions. An unreadable snapshot is reported in `missingAnchors`, which blocks
+   * verdicts: without both snapshots, "no other context file changed" cannot be established.
+   */
   private async anchorChanges(baselineId: string, candidateId: string | undefined, targets: ReadonlySet<string>) {
-    if (candidateId === undefined) return { unavailable: false, changes: { nonTargetChanges: [], targetChanges: EMPTY_DIFF } };
-    const [baseline, candidate] = await Promise.all([this.deps.store.getSnapshot(baselineId), this.deps.store.getSnapshot(candidateId)]);
-    if (!baseline || !candidate) return { unavailable: true, changes: { nonTargetChanges: [], targetChanges: EMPTY_DIFF } };
-    const diff = diffSnapshots(baseline, candidate);
+    const [baseline, candidate] = await Promise.all([
+      this.deps.store.getSnapshot(baselineId),
+      candidateId === undefined ? undefined : this.deps.store.getSnapshot(candidateId),
+    ]);
+    const missingAnchors = [
+      ...(baseline ? [] : [EExperimentRole.Baseline]),
+      ...(candidateId !== undefined && !candidate ? [EExperimentRole.Candidate] : []),
+    ];
+    const diff = baseline && candidate ? diffSnapshots(baseline, candidate) : undefined;
     return {
-      unavailable: false,
-      changes: { nonTargetChanges: diffPaths(excludeDiff(diff, targets)), targetChanges: restrictDiff(diff, targets) },
+      changes: {
+        nonTargetChanges: diff ? diffPaths(excludeDiff(diff, targets)) : [],
+        targetChanges: diff ? restrictDiff(diff, targets) : EMPTY_DIFF,
+        ...(missingAnchors.length > 0 && { missingAnchors }),
+      },
     };
   }
 }

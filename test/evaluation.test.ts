@@ -60,8 +60,9 @@ describe("evaluating an experiment", () => {
       for (const s of ["c1", "c2", "c3"]) await h.read(s, STYLE, { delivered: wholeFile(2) });
       const result = await h.evaluation.evaluate(id);
 
-      expect(result.verdict).toMatchObject({ verdict: EVerdict.Improved, improved: ["discovery.explicit-read"], regressed: [] });
-      expect(result.verdict.reasons.join(" ")).toContain("not a measure of overall task quality");
+      expect(result.verdict).toMatchObject({ verdict: EVerdict.Inconclusive, discovery: EVerdict.Improved, improved: ["discovery.explicit-read"], regressed: [] });
+      expect(result.verdict.reasons.join(" ")).toContain("does not show that they performed better");
+      expect(result.verdict.reasons.join(" ")).toContain("Task effectiveness remains unknown");
       const read = metric(result, "discovery.explicit-read");
       expect(read.baseline).toMatchObject({ n: 3, missing: 0, value: 0, numerator: 0, denominator: 3 });
       expect(read.candidate).toMatchObject({ n: 3, value: 1 });
@@ -91,9 +92,9 @@ describe("evaluating an experiment", () => {
       const h = makeHarness(dir);
       const id = await scenario(h, { baseline: ["b1", "b2", "b3"], candidate: ["c1", "c2", "c3"] });
       for (const s of ["b1", "b2", "b3"]) await h.read(s, STYLE, { delivered: wholeFile(2) });
-      expect((await h.evaluation.evaluate(id)).verdict).toMatchObject({ verdict: EVerdict.Regressed, regressed: ["discovery.explicit-read"] });
+      expect((await h.evaluation.evaluate(id)).verdict).toMatchObject({ verdict: EVerdict.Inconclusive, discovery: EVerdict.Regressed, regressed: ["discovery.explicit-read"] });
       for (const s of ["c1", "c2", "c3"]) await h.read(s, STYLE, { delivered: wholeFile(2) });
-      expect((await h.evaluation.evaluate(id)).verdict.verdict).toBe(EVerdict.Unchanged);
+      expect((await h.evaluation.evaluate(id)).verdict.discovery).toBe(EVerdict.Unchanged);
     });
   });
 

@@ -229,7 +229,8 @@ export function compareGroups(
   context: IComparisonContext,
   settings: IEvaluationSettings = DEFAULT_SETTINGS,
 ): IMetricComparison[] {
-  const incomparable = comparabilityProblems(context);
+  const differences = comparabilityDifferences(context);
+  const gaps = comparabilityGaps(context);
   return SPECS.map((spec): IMetricComparison => {
     const baseline = side(baselineGroups, spec);
     const candidate = side(candidateGroups, spec);
@@ -240,8 +241,10 @@ export function compareGroups(
     let verdict: EVerdict | undefined;
     if (spec.directional) {
       verdict = verdictFor(spec, baseline, candidate, settings, notes);
-      if (incomparable.length > 0 && verdict !== EVerdict.Inconclusive) {
-        notes.push(`Not comparable: ${incomparable.join("; ")}.`);
+      // The measurements stay; only the directional claim is withdrawn.
+      if (differences.length > 0 || gaps.length > 0) {
+        if (differences.length > 0) notes.push(`Not comparable: ${differences.join("; ")}.`);
+        if (gaps.length > 0) notes.push(`Comparability unknown: ${gaps.join("; ")}.`);
         verdict = EVerdict.Inconclusive;
       }
     }
@@ -262,8 +265,8 @@ export function compareGroups(
   });
 }
 
-/** Reasons the two populations cannot be compared like for like. Empty when nothing stands in the way. */
-export function comparabilityProblems(context: IComparisonContext): string[] {
+/** Confirmed reasons the two populations cannot be compared like for like. */
+export function comparabilityDifferences(context: IComparisonContext): string[] {
   const problems: string[] = [];
   if (context.modelsComparable === false) {
     problems.push(`models differ (${context.baselineModels.join(", ") || "none"} vs ${context.candidateModels.join(", ") || "none"})`);
@@ -275,35 +278,92 @@ export function comparabilityProblems(context: IComparisonContext): string[] {
   return problems;
 }
 
-/** One verdict for the experiment, built only from directional metrics and naming the metrics behind it. */
-export function overallVerdict(metrics: readonly IMetricComparison[], context: IComparisonContext): IOverallVerdict {
-  const directional = metrics.filter((m) => m.directional);
-  const improved = directional.filter((m) => m.verdict === EVerdict.Improved).map((m) => m.id);
-  const regressed = directional.filter((m) => m.verdict === EVerdict.Regressed).map((m) => m.id);
-  const unchanged = directional.filter((m) => m.verdict === EVerdict.Unchanged).map((m) => m.id);
-  const reasons: string[] = [];
-  const problems = comparabilityProblems(context);
+/**
+ * What is not known, as opposed to known to differ. Unknown is not comparable: a model or configuration
+ * change nobody recorded looks exactly like no change, and a missing anchor snapshot cannot show that no other
+ * context file changed.
+ */
+export function comparabilityGaps(context: IComparisonContext): string[] {
+  const gaps: string[] = [];
+  if (context.modelsComparable === undefined) gaps.push("the model is not recorded for every session on both sides");
+  if (context.environmentsComparable === undefined) gaps.push("the plugin tracking configuration is not recorded for every session on both sides");
+  for (const role of context.missingAnchors ?? []) {
+    gaps.push(`the ${role} revision snapshot is missing or damaged, so changes to other context files cannot be ruled out`);
+  }
+  return gaps;
+}
 
-  if (problems.length > 0) {
-    return { verdict: EVerdict.Inconclusive, improved: [], regressed: [], reasons: problems.map((p) => `Not comparable: ${p}.`) };
+/** Everything that blocks a directional verdict: confirmed differences and unknowns. */
+export const comparabilityProblems = (context: IComparisonContext): string[] => [
+  ...comparabilityDifferences(context),
+  ...comparabilityGaps(context),
+];
+
+/** The verdict of one family of directional metrics, with the metrics behind it. */
+function familyVerdict(metrics: readonly IMetricComparison[]) {
+  const ids = (verdict: EVerdict) => metrics.filter((m) => m.verdict === verdict).map((m) => m.id);
+  const improved = ids(EVerdict.Improved);
+  const regressed = ids(EVerdict.Regressed);
+  const unchanged = ids(EVerdict.Unchanged);
+  const noData = metrics.every((m) => m.baseline.n === 0 || m.candidate.n === 0);
+  let verdict = EVerdict.Inconclusive;
+  if (improved.length > 0 && regressed.length > 0) verdict = EVerdict.Inconclusive;
+  else if (regressed.length > 0) verdict = EVerdict.Regressed;
+  else if (improved.length > 0) verdict = EVerdict.Improved;
+  else if (unchanged.length > 0 && metrics.every((m) => m.verdict === EVerdict.Unchanged || (m.baseline.n === 0 && m.candidate.n === 0))) {
+    verdict = EVerdict.Unchanged;
   }
-  if (improved.length > 0 && regressed.length > 0) {
-    reasons.push("Some metrics improved while others regressed.");
-    return { verdict: EVerdict.Inconclusive, improved, regressed, reasons };
+  return { verdict, improved, regressed, mixed: improved.length > 0 && regressed.length > 0, noData };
+}
+
+/**
+ * Two verdicts, never blended. `discovery` says whether agents read the target files more, earlier or more
+ * completely; `verdict` (task effectiveness) moves only on grounded human outcome labels. A discovery
+ * improvement therefore never reads as an effectiveness improvement. Anything unknown or different about the
+ * two populations withdraws both.
+ */
+export function overallVerdict(metrics: readonly IMetricComparison[], context: IComparisonContext): IOverallVerdict {
+  const differences = comparabilityDifferences(context);
+  const gaps = comparabilityGaps(context);
+  if (differences.length > 0 || gaps.length > 0) {
+    return {
+      verdict: EVerdict.Inconclusive,
+      discovery: EVerdict.Inconclusive,
+      improved: [],
+      regressed: [],
+      reasons: [
+        ...differences.map((p) => `Not comparable: ${p}.`),
+        ...gaps.map((p) => `Comparability unknown: ${p}.`),
+        "Task effectiveness remains unknown.",
+      ],
+    };
   }
-  if (regressed.length > 0) return { verdict: EVerdict.Regressed, improved, regressed, reasons: ["Only the listed metrics regressed; others had no verdict."] };
-  if (improved.length > 0) {
-    return { verdict: EVerdict.Improved, improved, regressed, reasons: ["Only the listed metrics improved; this is not a measure of overall task quality."] };
-  }
-  if (unchanged.length > 0 && directional.every((m) => m.verdict === EVerdict.Unchanged || m.baseline.n === 0 && m.candidate.n === 0)) {
-    return { verdict: EVerdict.Unchanged, improved, regressed, reasons: ["No directional metric moved past the threshold."] };
-  }
-  reasons.push(
-    directional.every((m) => m.baseline.n === 0 || m.candidate.n === 0)
-      ? "No metric has data on both sides yet."
-      : "Samples are too few, or differences too small, for a conclusion.",
-  );
-  return { verdict: EVerdict.Inconclusive, improved, regressed, reasons };
+
+  const discovery = familyVerdict(metrics.filter((m) => m.directional && m.group === "discovery"));
+  const outcome = familyVerdict(metrics.filter((m) => m.directional && m.group === "outcome"));
+  const reasons: string[] = [];
+
+  if (discovery.mixed) reasons.push("Discovery: some metrics improved while others regressed.");
+  else if (discovery.verdict === EVerdict.Improved) {
+    reasons.push("Discovery improved: agents read the target files more, earlier or more completely. This does not show that they performed better.");
+  } else if (discovery.verdict === EVerdict.Regressed) {
+    reasons.push("Discovery regressed: agents read the target files less, later or less completely. This does not show that they performed worse.");
+  } else if (discovery.verdict === EVerdict.Unchanged) reasons.push("Discovery: no metric moved past the threshold.");
+  else reasons.push(discovery.noData ? "Discovery: no metric has data on both sides yet." : "Discovery: samples are too few, or differences too small, for a conclusion.");
+
+  if (outcome.mixed) reasons.push("Task effectiveness: success and adherence moved in opposite directions.");
+  else if (outcome.verdict === EVerdict.Improved) reasons.push("Task effectiveness: the listed human-labeled outcomes improved. Task difficulty is not controlled.");
+  else if (outcome.verdict === EVerdict.Regressed) reasons.push("Task effectiveness: the listed human-labeled outcomes regressed. Task difficulty is not controlled.");
+  else if (outcome.verdict === EVerdict.Unchanged) reasons.push("Task effectiveness: labeled outcomes did not move past the threshold.");
+  else reasons.push("Task effectiveness remains unknown: too few grounded outcome labels (a note or evidence reference) on both sides.");
+
+  return {
+    verdict: outcome.verdict,
+    discovery: discovery.verdict,
+    improved: [...discovery.improved, ...outcome.improved],
+    regressed: [...discovery.regressed, ...outcome.regressed],
+    reasons,
+  };
 }
 
 const sorted = (values: readonly string[]) => [...new Set(values)].sort();
@@ -355,11 +415,16 @@ export function limitationsFor(
   if (exclusionCount > 0) out.push(`${exclusionCount} selected session(s) were excluded; see the exclusions list.`);
   const noTimeline = all.filter((g) => !g.activity?.complete).length;
   if (noTimeline > 0) out.push(`Read-before-action and verification evidence is missing for ${noTimeline} session(s): their message log was not available.`);
-  if (context.modelsComparable === undefined) out.push("Model is unknown for at least one side, so model differences cannot be ruled out.");
-  if (context.environmentsComparable === undefined) out.push("Plugin configuration is unknown for at least one side.");
-  const comparability = comparabilityProblems(context);
-  for (const p of comparability) out.push(`Not comparable: ${p}.`);
+  for (const p of comparabilityDifferences(context)) out.push(`Not comparable: ${p}.`);
+  for (const p of comparabilityGaps(context)) out.push(`Comparability unknown, so no directional verdict: ${p}.`);
+  out.push("Discovery metrics describe whether agents read the target files. They do not show that agents performed better.");
   if (all.every((g) => g.outcome === undefined)) out.push("No outcome labels were entered, so task success and instruction adherence are unknown.");
+  const grounded = (groups: readonly IGroupMeasurement[]) => groups.filter((g) => isGrounded(g.outcome)).length;
+  if (grounded(baselineGroups) < settings.minSamples || grounded(candidateGroups) < settings.minSamples) {
+    out.push(
+      `Task effectiveness remains unknown: grounded outcome labels cover ${grounded(baselineGroups)} baseline and ${grounded(candidateGroups)} candidate session(s); ${settings.minSamples} per side are needed.`,
+    );
+  }
   out.push("Verification metrics count command names and exit codes only; they do not show that work was correct.");
   return out;
 }

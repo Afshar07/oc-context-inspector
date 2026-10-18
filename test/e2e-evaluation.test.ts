@@ -97,7 +97,8 @@ describe.skipIf(!projectDir || !before || !after)("revisions and experiments fro
     expect(metric("discovery.read-before-action").baseline.missing).toBe(6);
     expect(metric("verification.ran-verification").baseline).toMatchObject({ n: 0, missing: 6 });
     expect(metric("outcome.task-success").candidate.n).toBe(0);
-    expect(result.verdict).toMatchObject({ verdict: EVerdict.Improved, improved: ["discovery.explicit-read"], regressed: [] });
+    // Discovery improved; with no outcome labels, task effectiveness stays unknown.
+    expect(result.verdict).toMatchObject({ verdict: EVerdict.Inconclusive, discovery: EVerdict.Improved, improved: ["discovery.explicit-read"], regressed: [] });
 
     // --- Compatibility and privacy ---
     expect(await readLogs()).toEqual(logsBefore); // evaluating does not touch the read logs

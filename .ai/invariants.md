@@ -41,7 +41,9 @@ Contracts a change must not break unless the task explicitly changes them. Each 
 - No tool call scans the file system. Hooks stay observation-only: events are never written to, and every hook body is wrapped so a failure cannot reach the agent.
 - A candidate revision is linked only by explicit confirmation and only if the target files differ from the baseline. Experiments never edit `AGENTS.md`/`.ai/**`, revert anything, or start agents.
 - One lead plus its subagents is one sample. Missing evidence (no message log, no delivery info, auto-loaded targets, unlabeled outcomes) is reported as missing, never as zero or failure. Outcome rates use only labels with a note or evidence reference. Efficiency and verification metrics are signals without verdicts.
-- A verdict is `inconclusive` when samples are few, evidence is incomplete, models/configuration differ, or other context files changed between the anchor revisions. An overall `improved` names the metrics; it is not a claim about task quality. No AI-generated verdicts.
+- A verdict is `inconclusive` when samples are few, evidence is incomplete, models/configuration differ **or are unknown** (`modelsComparable`/`environmentsComparable` undefined), an anchor snapshot is missing or damaged (`missingAnchors`), or other context files changed between the anchor revisions. Unknown never counts as comparable. Descriptive measurements stay; only verdicts are withdrawn. No AI-generated verdicts. **Why:** unrecorded metadata looks identical to "nothing changed".
+- Two verdicts, never blended: `discovery` (reads of target files) and `verdict` (task effectiveness, from grounded human labels only). A discovery improvement must not surface as an effectiveness improvement. `discovery` is optional on stored results; absent means the result predates the split.
+- A session whose read records cannot be read is excluded (`RecordsUnreadable`); only a missing record file means zero reads.
 
 ## Determinism
 

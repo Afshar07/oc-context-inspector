@@ -207,13 +207,42 @@ verdict per metric is `improved`, `regressed`, `unchanged` or `inconclusive`:
 
 * A verdict needs at least 3 sessions per side. A rate change of 20 percentage points or more counts; under 10 is
   `unchanged`; in between is `inconclusive`. This is descriptive, not a significance test.
-* It is `inconclusive` when samples are too few, evidence is missing, the sides ran on different models or plugin
-  configurations, or other context files changed between the two revisions.
-* The overall verdict is built from the directional metrics (discovery and labeled outcomes) and names them: an
-  `improved` verdict says which metric improved and is not a claim about overall task quality.
+* It is `inconclusive` when samples are too few, evidence is missing, or the sides cannot be shown to be comparable
+  (below). The measurements are still shown; only the directional claim is withdrawn.
+
+### What the verdicts mean
+
+The result has two verdicts, never blended into one score:
+
+* **Discovery** (`improved`, `regressed`, `unchanged`, `inconclusive`): did agents read the target files more, earlier
+  or more completely? `improved` means exactly that. It does not show that agents did better work.
+* **Task effectiveness**: decided only by your grounded outcome labels (task success, instruction adherence). With too
+  few labels it reads *unknown (inconclusive)*, even when discovery improved. Effectiveness `improved` still does not
+  control for task difficulty.
+
+Efficiency and verification metrics are signals and never get a verdict.
+
+Both verdicts are `inconclusive` unless the two sides are confirmed comparable. *Unknown* blocks as much as *different*:
+
+* **Model or plugin configuration.** If any session on either side has no recorded model or configuration, comparability
+  is unknown. A change nobody recorded looks the same as no change, so no directional claim is made. Confirmed
+  differences are reported as "not comparable", missing metadata as "comparability unknown".
+* **Revision snapshots.** The baseline and candidate snapshots are how the plugin knows no other context file changed.
+  If either is missing or damaged, that cannot be established, so the evaluation is `inconclusive` with an explanation.
+* **Other context files.** A change outside the target files between the two revisions confounds the comparison.
+* **Sessions.** Sessions with a mixed, unknown or mismatched revision, or with unreadable read records, are excluded
+  with the reason; they are never counted as zero reads.
 
 Model and plugin-configuration metadata are recorded with each evaluation (never secrets) and differences are listed.
 Each evaluation is stored with the experiment together with its per-session measurements, so it can be recomputed.
+Evaluations stored before the two verdicts were separated show their single verdict with a note.
+
+### Known limitations and recommended process
+
+Sessions are chosen by hand and task difficulty is not measured; there is no significance test; only explicit tool
+reads are observed. To get a fair comparison, run the same kind of task (a similar bug fix, say) on both sides, with the
+same model and plugin options, at least 3 sessions per side, change only the target files between the revisions,
+leave the experiment's other context files alone, and label outcomes with a note or a PR/CI reference.
 
 ### Data
 

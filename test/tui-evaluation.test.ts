@@ -58,7 +58,9 @@ describe("evaluation view", () => {
       const result = await h.evaluation.evaluate(exp.id);
       const view = text(evaluationLines(result, await h.experiments.get(exp.id)));
 
-      expect(view).toContain("Verdict: improved — Sessions that read a target file");
+      expect(view).toContain("Discovery: improved");
+      expect(view).toContain("improved: Sessions that read a target file");
+      expect(view).toContain("Task effectiveness: unknown (inconclusive)");
       expect(view).not.toMatch(/task quality improved|overall improvement/i);
       expect(view.indexOf("Observed (counted")).toBeLessThan(view.indexOf("Human-labeled (typed by you"));
       expect(view).toContain("+100 pp");

@@ -27,6 +27,7 @@ Run typecheck and tests for any change in `src/`. Run a single file with `npx vi
 | Revisions: ids, diffs, snapshotter, session classification | `revisions.test.ts`, `session-revisions.test.ts` |
 | Experiments: lifecycle, selection, labels, persistence | `experiments.test.ts` |
 | Metrics, comparison, evaluation service | `evaluation.test.ts` |
+| Reliability: unknown comparability, missing/corrupt anchor snapshots, discovery vs effectiveness, unreadable records | `evaluation-reliability.test.ts` |
 | Evaluation RPC schemas, activity summary, plugin wiring | `evaluation-rpc.test.ts`, `plugin-evaluation.test.ts` |
 | Experiment TUI logic (formatting, dialogs, keymaps) | `tui-evaluation.test.ts` |
 

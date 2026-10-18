@@ -61,7 +61,7 @@ after a documentation change. It never edits documentation, runs agents or calls
 | `store.ts`, `json-file.ts` | `EvaluationStore` (snapshots, session records, experiments); atomic JSON write and tolerant read |
 | `experiments.ts` | `ExperimentService`: create/validate/dedupe, detect and confirm the candidate, session offers and selection, outcome labels, close. Per-experiment lock |
 | `metrics.ts` | `measureGroup`: deterministic per-group measurements from read records and activity |
-| `comparison.ts` | `compareGroups`, per-metric verdicts, `overallVerdict`, comparability and limitations. Thresholds are `DEFAULT_SETTINGS` |
+| `comparison.ts` | `compareGroups`, per-metric verdicts, `overallVerdict` (separate `discovery` and effectiveness verdicts), comparability split into confirmed differences and unknown gaps, limitations. Thresholds are `DEFAULT_SETTINGS` |
 | `evaluate.ts` | `EvaluationService`: selects clean samples, records exclusions with reasons, builds and stores the result |
 | `activity.ts` | `summarizeActivity` (pure; used by the TUI): first file change, shell and test-like run counts from the message log. Returns counts only |
 | `rpc-handlers.ts` | Handlers merged into the plugin RPC; user mistakes (`ExperimentError`) come back as `{ ok: false, error }` |

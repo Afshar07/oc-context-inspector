@@ -108,6 +108,7 @@ const ComparisonContext = Schema.Struct({
   candidateEnvironments: Schema.Array(Schema.String),
   modelsComparable: optional(Schema.Boolean),
   environmentsComparable: optional(Schema.Boolean),
+  missingAnchors: optional(Schema.Array(Schema.Enum(EExperimentRole))),
   nonTargetChanges: Schema.Array(Schema.String),
   targetChanges: RevisionDiff,
 });
@@ -132,6 +133,7 @@ export const EvaluationResult = Schema.Struct({
   context: ComparisonContext,
   verdict: Schema.Struct({
     verdict: Schema.Enum(EVerdict),
+    discovery: optional(Schema.Enum(EVerdict)),
     improved: Schema.Array(Schema.String),
     regressed: Schema.Array(Schema.String),
     reasons: Schema.Array(Schema.String),

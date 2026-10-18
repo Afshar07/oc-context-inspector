@@ -189,6 +189,8 @@ export enum EExclusionReason {
   /** The target files match but other context files differ from the experiment's anchor revision. */
   OtherContextDiffers = "other-context-differs",
   NoCandidate = "no-candidate-revision",
+  /** The session's read records could not be read. Not the same as a session with no reads. */
+  RecordsUnreadable = "records-unreadable",
 }
 
 export interface IExclusion {
@@ -350,9 +352,15 @@ export interface IComparisonContext {
   readonly candidateModels: readonly string[];
   readonly baselineEnvironments: readonly string[];
   readonly candidateEnvironments: readonly string[];
-  /** Models of both sides are known and the same set. Undefined when either side is unknown. */
+  /**
+   * Models of both sides are known and the same set (true), known and different (false). Undefined when any
+   * session of either side has no model recorded: unknown is not comparable, and blocks directional verdicts.
+   */
   readonly modelsComparable?: boolean;
+  /** Same, for the plugin tracking configuration. */
   readonly environmentsComparable?: boolean;
+  /** Anchor revisions whose snapshot is missing or damaged. Absent (older results) or empty: both were readable. */
+  readonly missingAnchors?: readonly EExperimentRole[];
   /** Context files outside the targets that differ between the two anchor revisions. */
   readonly nonTargetChanges: readonly string[];
   /** Target files that changed between the anchor revisions. */
@@ -360,8 +368,15 @@ export interface IComparisonContext {
 }
 
 export interface IOverallVerdict {
+  /**
+   * Task effectiveness: decided only by grounded human outcome labels (task success, instruction adherence).
+   * Inconclusive when those labels are too few, even if discovery moved. Results stored before `discovery`
+   * existed carry a verdict that mixed both.
+   */
   readonly verdict: EVerdict;
-  /** Ids of metrics that improved/regressed. A verdict `improved` is about exactly these, not task quality in general. */
+  /** Context discovery: whether agents read the target files more, earlier or more completely. Not task quality. */
+  readonly discovery?: EVerdict;
+  /** Ids of directional metrics that improved/regressed (discovery and outcome). */
   readonly improved: readonly string[];
   readonly regressed: readonly string[];
   readonly reasons: readonly string[];
