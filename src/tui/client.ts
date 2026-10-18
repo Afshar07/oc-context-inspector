@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin/tui";
 import { ContextInspectorRpc } from "../rpc.js";
 import type { ICoverageClient } from "./source.js";
+import { buildTimeline } from "./timeline.js";
 
 /**
  * Opens a follow-up session holding `message` queued (not sent): the agent sees it
@@ -63,6 +64,25 @@ async function userPrompts(ctx: Plugin.Context, sessionID: string): Promise<stri
     .flatMap((message) => (message.type === "user" && message.text.trim() !== "" ? [message.text] : []));
 }
 
+/**
+ * The steps of the session and of the sessions it spawned, from OpenCode's own message log.
+ * Undefined when nothing could be loaded: the review then says ordering is unknown.
+ */
+async function sessionTimeline(ctx: Plugin.Context, client: ICoverageClient, sessionID: string) {
+  const directory = ctx.data.session.get(sessionID)?.location.directory;
+  if (!directory) return undefined;
+  const report = await client.coverage(sessionID).catch(() => undefined);
+  const ids = [sessionID, ...new Set((report?.files ?? []).flatMap((f) => f.agents.map((a) => a.sessionID)).filter((id) => id !== sessionID))];
+  const sessions = await Promise.all(
+    ids.map(async (id) => {
+      await ctx.data.session.message.sync(id).catch(() => {});
+      return { sessionID: id, messages: ctx.data.session.message.list(id) as readonly unknown[] };
+    }),
+  );
+  const { events, omitted } = buildTimeline(sessions, directory);
+  return events.length > 0 ? { events, omitted } : undefined;
+}
+
 /** Calls the server half over RPC, routed to the server instance that owns the session's project. */
 export function rpcCoverageClient(ctx: Plugin.Context): ICoverageClient {
   const rpc = ctx.client.rpc(ContextInspectorRpc);
@@ -70,15 +90,19 @@ export function rpcCoverageClient(ctx: Plugin.Context): ICoverageClient {
     const directory = ctx.data.session.get(sessionID)?.location.directory;
     return directory ? { location: { directory } } : undefined;
   };
-  return {
+  const client: ICoverageClient = {
     coverage: (sessionID) => rpc.coverage({ sessionID }, routed(sessionID)),
     preview: async (sessionID, filePath) => {
       const result = await rpc.preview({ sessionID, filePath }, routed(sessionID));
       return result.found ? result.preview : undefined;
     },
     onRead: (handler) => rpc.events.on("read", (event) => handler(event.data)),
-    analyzeSession: async (sessionID, model) =>
-      rpc.analyzeSession({ sessionID, task: await userPrompts(ctx, sessionID), ...(model && { model }) }, routed(sessionID)),
+    analyzeSession: async (sessionID, model) => {
+      const task = await userPrompts(ctx, sessionID);
+      const timeline = await sessionTimeline(ctx, client, sessionID).catch(() => undefined);
+      return rpc.analyzeSession({ sessionID, task, ...(model && { model }), ...(timeline && { timeline }) }, routed(sessionID));
+    },
     reviewProject: (sessionID, model) => rpc.reviewProject({ ...(model && { model }) }, routed(sessionID)),
   };
+  return client;
 }

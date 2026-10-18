@@ -7,7 +7,7 @@ instructions.
 
 | Task | Read when you're... |
 | --- | --- |
-| None | — |
+| `reviewer-timeline-and-categories.md` | improving the post-session reviewer: action timeline, finding categories, causal chain, remedy taxonomy |
 
 Move durable conventions into the appropriate focused context document when a
 task finishes, then remove its ongoing-task entry and task document.

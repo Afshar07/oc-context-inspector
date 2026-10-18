@@ -97,7 +97,13 @@ remembered; `esc` cancels). The answer opens in the session panel
 the conversation and do not change it.
 
 * `/context-analyze`: **this session.** Did the agent read the context its task needed, what did it skip, and which
-  reads look irrelevant? The task is the session's user messages. Reads by subagents are listed per agent.
+  reads look irrelevant? The task is the session's user messages. Reads by subagents are listed per agent. The model
+  also gets a **timeline** of the session and its subagents (user messages, tool calls with their status, file paths,
+  shell exit codes, and what each context read delivered), built from OpenCode's own message log: nothing extra is
+  recorded. Each finding is labelled `context-discovery` (guidance not loaded), `instruction-adherence` (loaded but
+  not followed) or `verification-reporting` (claims beyond the evidence), with the triggering action, the quoted
+  instruction, whether it was already loaded before that action, a confidence and a remedy. Server and TUI update
+  together; an older TUI sends no timeline and the review then says ordering is unknown.
 * `/context-review`: **all known sessions in the project**, zero-read ones included, split by lead and subagent
   sessions. Which files or sections are never or rarely read, which are only partly read (candidates to split or
   trim), and a short list of concrete edits. The prompt states how many sessions were observed and how many are older
@@ -114,6 +120,8 @@ normal tools and permissions of any session, so it can read and edit files.
 
 What is sent to the model: read metadata (status, line ranges, counts; per section, whether it was fully, partly or
 not read, or in how many sessions) plus each context file's **outline**: its Markdown headings with line numbers.
+The timeline adds tool names, project-relative paths, statuses, short error messages and exit codes; shell command
+text is sent only when `analysis.includeContent` is on.
 File bodies are **not** sent unless `analysis.includeContent` is on. With it on, unread files reach the model provider
 even though the agent never read them. Contents are capped at 8,000 characters per file (truncation marker included)
 and 40,000 characters in total for everything the content blocks add to the prompt (fences and markers included).

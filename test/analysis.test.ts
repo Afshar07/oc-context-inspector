@@ -7,12 +7,21 @@ import {
   buildProjectPrompt,
   buildSessionPrompt,
   extractOutline,
+  formatTimeline,
   toSections,
 } from "../src/analysis.js";
 import { CoverageService, summarize } from "../src/coverage.js";
 import { ContextPathMatcher, DEFAULT_CONTEXT_PATHS } from "../src/matcher.js";
 import { JsonlContextReadStore } from "../src/store.js";
-import { EReadStatus, ESessionTracking, type IContextReadRecord, type ISessionObservation } from "../src/types.js";
+import {
+  EDeliverySource,
+  EReadStatus,
+  ESessionTracking,
+  ETimelineKind,
+  type IContextReadRecord,
+  type ISessionObservation,
+  type ITimelineEvent,
+} from "../src/types.js";
 import { withTempDir } from "./helpers.js";
 
 const rec = (
@@ -108,7 +117,40 @@ describe("prompt builders", () => {
     const coverage = summarize("a.md", [], { exists: true, lineCount: 1 }, false);
     const withContent = buildSessionPrompt({ task: ["x".repeat(10_000)], files: [{ coverage, sections: [], content: "SECRET BODY" }] });
     expect(withContent).toContain("SECRET BODY");
-    expect(withContent.length).toBeLessThan(6_000);
+    // 4,000 task characters plus the fixed instructions; an uncapped task would add 6,000 more.
+    expect(withContent.length).toBeLessThan(8_000);
+  });
+
+  it("asks for categorized findings and says ordering is unknown without a timeline", () => {
+    const prompt = buildSessionPrompt({ task: ["t"], files: [] });
+    for (const word of ["context-discovery", "instruction-adherence", "verification-reporting", "agent-oversight", "tracking-limitation"]) {
+      expect(prompt).toContain(word);
+    }
+    expect(prompt).toContain("never a documentation change");
+    expect(prompt).toContain("## Timeline");
+    expect(prompt).toContain("unavailable");
+  });
+
+  it("renders the timeline in order, reads with what they delivered, commands only when allowed", () => {
+    const events: ITimelineEvent[] = [
+      { at: "2026-01-01T10:00:00.000Z", sessionID: "lead", kind: ETimelineKind.User, text: "fix it" },
+      { at: "2026-01-01T10:00:01.000Z", sessionID: "lead", kind: ETimelineKind.Tool, tool: "read", status: "completed", path: "AGENTS.md", callID: "c1" },
+      { at: "2026-01-01T10:00:02.000Z", sessionID: "lead", kind: ETimelineKind.Tool, tool: "edit", status: "error", path: "a.ts", text: "no match" },
+      { at: "2026-01-01T10:00:03.000Z", sessionID: "kid", agentID: "explore", kind: ETimelineKind.Tool, tool: "grep", status: "completed" },
+      { at: "2026-01-01T10:00:04.000Z", sessionID: "lead", kind: ETimelineKind.Shell, command: "npm test", exit: 1 },
+    ];
+    const reads = new Map([["c1", { ...rec("lead", "AGENTS.md"), delivered: { source: EDeliverySource.Header, lineCount: 20, range: { start: 1, end: 20 }, reachedEof: false } }]]);
+    const hidden = formatTimeline(events, { sessionID: "lead", reads, omitted: 4, includeCommands: false });
+    expect(hidden.split("\n")).toEqual([
+      "(4 earlier low-value steps omitted to fit)",
+      '10:00:00 [lead] USER: "fix it"',
+      "10:00:01 [lead] read AGENTS.md L1–20 delivered",
+      "10:00:02 [lead] edit a.ts FAILED: no match",
+      "10:00:03 [subagent explore] grep",
+      "10:00:04 [lead] shell command (exit 1)",
+    ]);
+    expect(formatTimeline(events, { sessionID: "lead", reads, omitted: 0, includeCommands: true })).toContain("shell command (exit 1): npm test");
+    expect(buildSessionPrompt({ task: [], files: [], timeline: hidden })).toContain("10:00:02 [lead] edit a.ts FAILED");
   });
 
   it("gives the project prompt usage ratios per file and section", () => {
@@ -154,6 +196,25 @@ describe("AnalysisService", () => {
       expect(prompts[0]).toContain("Explain the data flow");
       expect(prompts[0]).toMatch(/\[partly read\] # Overview/);
       expect(prompts[0]).not.toContain("intro\n");
+    }));
+
+  it("adds the timeline, joining reads to their records, and shows commands only with includeContent", () =>
+    withTempDir(async (dir) => {
+      const timeline = {
+        omitted: 0,
+        events: [
+          { at: "2026-01-01T10:00:00.000Z", sessionID: "s1", kind: ETimelineKind.Tool, tool: "read", status: "completed" as const, callID: 's1-.ai/doc.md-{"offset":2,"limit":3}' },
+          { at: "2026-01-01T10:00:01.000Z", sessionID: "s1", kind: ETimelineKind.Shell, command: "npm test", exit: 0 },
+        ],
+      };
+      const off = await setup(dir, false);
+      await off.service.analyzeSession("s1", ["t"], undefined, timeline);
+      expect(off.prompts[0]).toContain("read .ai/doc.md (estimated: requested offset 2, limit 3)");
+      expect(off.prompts[0]).toContain("shell command (exit 0)");
+      expect(off.prompts[0]).not.toContain("npm test");
+      const on = await setup(dir, true);
+      await on.service.analyzeSession("s1", ["t"], undefined, timeline);
+      expect(on.prompts[0]).toContain("shell command (exit 0): npm test");
     }));
 
   it("reviews the project across every recorded session", () =>

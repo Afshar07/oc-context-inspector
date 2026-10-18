@@ -269,3 +269,35 @@ export interface IFilePreview {
   /** `lines` may differ from what the agent received: the file changed or was deleted, or the ranges are estimates. */
   readonly contentMayDiffer: boolean;
 }
+
+/** What one timeline event is. Values are the RPC form. */
+export enum ETimelineKind {
+  User = "user",
+  Tool = "tool",
+  Shell = "shell",
+  AgentSwitch = "agent-switch",
+  Compaction = "compaction",
+}
+
+/**
+ * One step of a session as OpenCode recorded it, reduced to metadata. Built by the TUI from the
+ * session's messages and never persisted; the server decides what reaches a model prompt.
+ */
+export interface ITimelineEvent {
+  /** ISO time the step started. */
+  readonly at: string;
+  readonly sessionID: string;
+  readonly agentID?: string;
+  readonly kind: ETimelineKind;
+  readonly tool?: string;
+  readonly status?: "completed" | "error";
+  /** Project-relative POSIX path argument of the tool call. */
+  readonly path?: string;
+  /** Tool call id: the key that joins a tool step to its context-read record. */
+  readonly callID?: string;
+  /** User: first characters of the message. Tool: truncated error message. AgentSwitch: the agent. */
+  readonly text?: string;
+  /** Shell command, first line truncated. Dropped by the server unless contents may be sent. */
+  readonly command?: string;
+  readonly exit?: number;
+}

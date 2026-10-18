@@ -69,8 +69,10 @@ function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: A
       return preview ? { found: true as const, preview } : { found: false as const };
     },
     // Model failures (no provider, rate limits) are answers for the TUI to show, not RPC faults.
-    analyzeSession: ({ sessionID, task, model }) =>
-      withModel(model, async (m) => ({ text: await analysis.analyzeSession(sessionID, task, m) })).catch(failure),
+    analyzeSession: ({ sessionID, task, model, timeline }) =>
+      withModel(model, async (m) => ({
+        text: await analysis.analyzeSession(sessionID, task, m, timeline && { events: timeline.events, omitted: timeline.omitted }),
+      })).catch(failure),
     reviewProject: ({ model }) => withModel(model, (m) => analysis.reviewProject(m)).catch(failure),
   });
 }

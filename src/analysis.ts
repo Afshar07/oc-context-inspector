@@ -7,12 +7,14 @@ import {
   ESessionLineage,
   ESessionTracking,
   EReadStatus,
+  ETimelineKind,
   type IAgentReadSummary,
   type IContextReadRecord,
   type IFileCoverage,
   type ILineRange,
   type IModelRef,
   type ISessionObservation,
+  type ITimelineEvent,
 } from "./types.js";
 
 const MAX_TASK_CHARS = 4_000;
@@ -256,7 +258,79 @@ function describeAgent(a: IAgentReadSummary): string {
   return `${a.agentID ?? "unknown agent"} (${a.role}${a.depth > 0 ? `, depth ${a.depth}` : ""}): ${a.readCount} reads${notes.length > 0 ? ` [${notes.join(", ")}]` : ""}`;
 }
 
-export function buildSessionPrompt(input: { readonly task: readonly string[]; readonly files: readonly ISessionFileInput[] }): string {
+/** What `formatTimeline` needs besides the events. */
+export interface ITimelineRender {
+  /** The session being analyzed; every other session in the events is one of its subagents. */
+  readonly sessionID: string;
+  /** Context-read records by tool call id, so a read shows what it delivered. */
+  readonly reads: ReadonlyMap<string, IContextReadRecord>;
+  /** Events the TUI dropped to stay within its cap. */
+  readonly omitted: number;
+  /** Shell commands may hold secrets: they are shown only when file contents may be sent too. */
+  readonly includeCommands: boolean;
+}
+
+function describeRead(r: IContextReadRecord): string {
+  if (r.status === EReadStatus.Error) return `read ${r.filePath} FAILED${r.errorMessage ? `: ${r.errorMessage}` : ""}`;
+  const range = r.delivered?.range;
+  if (range) return `read ${r.filePath} ${formatRange(range)} delivered${r.delivered?.reachedEof ? " (to end)" : ""}`;
+  if (r.delivered) return `read ${r.filePath} delivered 0 lines`;
+  const { offset, limit } = r.requestedRange;
+  return `read ${r.filePath} (estimated: requested ${offset !== undefined || limit !== undefined ? `offset ${offset ?? 1}, limit ${limit ?? "all"}` : "whole file"})`;
+}
+
+/** One line per step, in order; context reads are shown with what the tool returned. */
+export function formatTimeline(events: readonly ITimelineEvent[], render: ITimelineRender): string {
+  const lines = events.map((e) => {
+    const who = e.sessionID === render.sessionID ? "lead" : `subagent ${e.agentID ?? e.sessionID}`;
+    const time = e.at.slice(11, 19);
+    const prefix = `${time} [${who}]`;
+    switch (e.kind) {
+      case ETimelineKind.User:
+        return `${prefix} USER: ${JSON.stringify(e.text ?? "")}`;
+      case ETimelineKind.AgentSwitch:
+        return `${prefix} switched to agent ${e.agentID ?? "?"}`;
+      case ETimelineKind.Compaction:
+        return `${prefix} context compacted`;
+      case ETimelineKind.Shell: {
+        const outcome = e.exit !== undefined ? `exit ${e.exit}` : (e.text ?? "no exit code");
+        return `${prefix} shell command (${outcome})${render.includeCommands && e.command ? `: ${e.command}` : ""}`;
+      }
+      case ETimelineKind.Tool: {
+        const record = e.callID !== undefined ? render.reads.get(e.callID) : undefined;
+        if (record) return `${prefix} ${describeRead(record)}`;
+        const outcome = e.status === "error" ? ` FAILED${e.text ? `: ${e.text}` : ""}` : "";
+        return `${prefix} ${e.tool ?? "tool"}${e.path ? ` ${e.path}` : ""}${outcome}`;
+      }
+    }
+  });
+  if (render.omitted > 0) lines.unshift(`(${render.omitted} earlier low-value steps omitted to fit)`);
+  return lines.join("\n");
+}
+
+const TIMELINE_UNAVAILABLE =
+  "(unavailable: the session's steps could not be loaded. Do not claim anything about what happened before or after another action; answer \"unknown\" for ordering.)";
+
+const ANSWER_FORMAT = `Answer in at most 400 words of Markdown with these parts:
+1. **Verdict**: one or two sentences: did the agent read enough of the project context for this task?
+2. **Findings**: only actionable ones, most important first. Each finding states:
+   - **Category**, exactly one of: \`context-discovery\` (required guidance was not loaded), \`instruction-adherence\` (guidance was loaded but not followed), \`verification-reporting\` (claims or reports exceeded the evidence the timeline shows).
+   - **Evidence**: cite timeline lines or file sections.
+   - **Triggering action**: the action that made the guidance applicable.
+   - **Instruction**: the instruction that required it, quoted exactly. If its text is not in the data (an auto-loaded file whose content is not included), say so.
+   - **Before the action?**: whether the guidance was already loaded before that action, from the timeline order, or "unknown".
+   - **Confidence**: \`confirmed\` only with the quoted instruction and the ordering; otherwise \`possible\`.
+   - **Remedy**, exactly one of: \`agent-oversight\`, \`ambiguous-routing\`, \`missing-documentation\`, \`tracking-limitation\`.
+3. **Noise** (optional): reads that look irrelevant to the task.
+Rules: when the quoted instruction was already clear, the remedy is \`agent-oversight\`, never a documentation change. Judge verification only from the commands and results in the timeline; if they are not shown, say verification cannot be judged. Use \`tracking-limitation\` for blind spots the data states (auto-loaded files are never recorded, a call killed mid-read leaves no record).
+Base every claim on the data below. If the data is not enough to judge, say so.`;
+
+export function buildSessionPrompt(input: {
+  readonly task: readonly string[];
+  readonly files: readonly ISessionFileInput[];
+  /** Output of `formatTimeline`; absent when the TUI could not provide the session's steps. */
+  readonly timeline?: string;
+}): string {
   const task = input.task.join("\n---\n").slice(0, MAX_TASK_CHARS) || "(no user messages available)";
   const files = input.files.map(({ coverage: f, sections, content }) => {
     const reads = f.ranges.length > 0 ? `read ${f.ranges.map(formatRange).join(", ")}${certaintyLabel(f)}` : "nothing read";
@@ -272,14 +346,13 @@ export function buildSessionPrompt(input: { readonly task: readonly string[]; re
 ${DATA_CAVEAT}
 Reads by agents in sessions this session spawned (subagents) are listed under "by agent" but do not count toward the status, which is what this session's own agent received.
 
-Answer in at most 250 words of Markdown with these parts:
-1. **Verdict**: did the agent read enough of the project context for this task?
-2. **Gaps**: unread files or sections that likely mattered for the task, and why (cite file and section).
-3. **Noise** (optional): reads that look irrelevant to the task.
-Base every claim on the data below. If the outlines are not enough to judge, say so.
+${ANSWER_FORMAT}
 
 ## Task (the user's messages)
 ${task}
+
+## Timeline (steps in order, subagents included)
+${input.timeline !== undefined && input.timeline !== "" ? input.timeline : TIMELINE_UNAVAILABLE}
 
 ## Context files
 ${files.join("\n\n")}
@@ -375,7 +448,13 @@ export class AnalysisService {
     this.registry = registry ?? new SessionRegistry(dataDir);
   }
 
-  async analyzeSession(sessionID: string, task: readonly string[], model?: IModelRef): Promise<string> {
+  /** `timeline`: the session's steps from the TUI; without it the prompt says ordering is unknown. */
+  async analyzeSession(
+    sessionID: string,
+    task: readonly string[],
+    model?: IModelRef,
+    timeline?: { readonly events: readonly ITimelineEvent[]; readonly omitted?: number },
+  ): Promise<string> {
     const report = await this.coverage.coverage(sessionID);
     if (report.files.length === 0) return "No context files in this project; nothing to analyze.";
     const loaded = await Promise.all(
@@ -391,7 +470,24 @@ export class AnalysisService {
       sections: toSections(extractOutline(lines ?? []), lines?.length ?? 0),
       content: this.options.includeContent && lines ? budget.take(lines.join("\n")) : undefined,
     }));
-    return this.generate(buildSessionPrompt({ task, files }), model);
+    const rendered = timeline && timeline.events.length > 0 ? await this.renderTimeline(sessionID, timeline) : undefined;
+    return this.generate(buildSessionPrompt({ task, files, ...(rendered !== undefined && { timeline: rendered }) }), model);
+  }
+
+  private async renderTimeline(
+    sessionID: string,
+    timeline: { readonly events: readonly ITimelineEvent[]; readonly omitted?: number },
+  ): Promise<string> {
+    const reads = new Map<string, IContextReadRecord>();
+    for (const id of new Set(timeline.events.map((e) => e.sessionID))) {
+      for (const record of await readSessionRecords(this.dataDir, id).catch(() => [])) reads.set(record.callID, record);
+    }
+    return formatTimeline(timeline.events, {
+      sessionID,
+      reads,
+      omitted: timeline.omitted ?? 0,
+      includeCommands: this.options.includeContent,
+    });
   }
 
   async reviewProject(model?: IModelRef): Promise<IProjectReview> {

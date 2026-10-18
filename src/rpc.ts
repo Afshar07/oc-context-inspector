@@ -5,8 +5,10 @@ import {
   ECoverageCertainty,
   ECoverageStatus,
   ESessionTracking,
+  ETimelineKind,
   type ICoverageReport,
   type IFilePreview,
+  type ITimelineEvent,
 } from "./types.js";
 
 /** RPC methods/events need Standard Schema on both ends; Effect schemas provide it. */
@@ -58,6 +60,20 @@ const FilePreview = Schema.Struct({
   contentMayDiffer: Schema.Boolean,
 });
 
+const TimelineEvent = Schema.Struct({
+  at: Schema.String,
+  sessionID: Schema.String,
+  agentID: Schema.optionalKey(Schema.String),
+  kind: Schema.Enum(ETimelineKind),
+  tool: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(Schema.Literals(["completed", "error"])),
+  path: Schema.optionalKey(Schema.String),
+  callID: Schema.optionalKey(Schema.String),
+  text: Schema.optionalKey(Schema.String),
+  command: Schema.optionalKey(Schema.String),
+  exit: Schema.optionalKey(Schema.Number),
+});
+
 const Failure = Schema.Struct({ ok: Schema.Literal(false), error: Schema.String });
 
 // Compile-time guard that the wire schemas and the domain types stay in step.
@@ -66,6 +82,8 @@ sameShape<ICoverageReport, (typeof CoverageReport)["Type"]>((a) => a);
 sameShape<(typeof CoverageReport)["Type"], ICoverageReport>((a) => a);
 sameShape<IFilePreview, (typeof FilePreview)["Type"]>((a) => a);
 sameShape<(typeof FilePreview)["Type"], IFilePreview>((a) => a);
+sameShape<ITimelineEvent, (typeof TimelineEvent)["Type"]>((a) => a);
+sameShape<(typeof TimelineEvent)["Type"], ITimelineEvent>((a) => a);
 
 /** Shared by the server entry (registers handlers) and the TUI entry (calls them). */
 export const ContextInspectorRpc = Rpc.define({
@@ -79,7 +97,13 @@ export const ContextInspectorRpc = Rpc.define({
     analyzeSession: {
       // `model`: `provider/model[#variant]` picked in the TUI; the configured or default model when absent.
       input: portable(
-        Schema.Struct({ sessionID: Schema.String, task: Schema.Array(Schema.String), model: Schema.optionalKey(Schema.String) }),
+        Schema.Struct({
+          sessionID: Schema.String,
+          task: Schema.Array(Schema.String),
+          model: Schema.optionalKey(Schema.String),
+          // Steps of the session and its subagents, built by the TUI; absent from older TUIs.
+          timeline: Schema.optionalKey(Schema.Struct({ events: Schema.Array(TimelineEvent), omitted: Schema.Number })),
+        }),
       ),
       output: portable(
         Schema.Union([Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, model: Schema.String }), Failure]),
