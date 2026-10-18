@@ -112,6 +112,8 @@ the conversation and do not change it.
   trim), and a short list of concrete edits. The prompt states how many sessions were observed and how many are older
   reads-only sessions, so the model does not over-trust the ratios.
 
+Press **`e`** in the panel to turn a review into a measured [context experiment](#context-experiments).
+
 **Acting on a review: `n` in the panel** opens a follow-up session where an agent can make the changes:
 
 * `n` starts a **new** session in the project. It has no history, so after `/context-analyze` the first message
@@ -135,6 +137,98 @@ File bodies are **not** sent unless `analysis.includeContent` is on. With it on,
 even though the agent never read them. Contents are capped at 8,000 characters per file (truncation marker included)
 and 40,000 characters in total for everything the content blocks add to the prompt (fences and markers included).
 Files are served in path order after all of them are loaded, so which file gets cut never depends on timing.
+
+## Context experiments
+
+Reviews suggest documentation changes. **Context experiments** measure whether a change you make helps: they compare
+how agents behaved before and after, using only what the plugin can observe. The workflow is
+**observe → analyze → propose → approve → measure → compare**; the plugin does the measuring and never the editing.
+It does not change documentation, run agents, commit, roll back, or call a model for a verdict. You edit the context
+files yourself or through your normal agent workflow.
+
+### Context revisions
+
+The plugin fingerprints the tracked context files (`contextPaths`) with SHA-256, locally, and combines the
+fingerprints, sorted by project-relative path, into a **revision id** (16 hex characters). It needs no Git. The same
+files always give the same id, whatever order or machine they are on; any change to a file's bytes, or adding,
+deleting or renaming a file, gives a new one. Only paths, hashes and sizes are stored, never contents.
+
+Each session is tied to the revision in place when it began:
+
+* A session is **stable** when its starting revision is known and the context did not change while it ran.
+* **mixed** when the context changed during it (for example the agent edited `AGENTS.md`), or when a subagent ran under
+  a different revision than its lead. Mixed sessions are never used as clean before/after samples.
+* **unknown** when the start cannot be established: sessions that ran before this feature, sessions the plugin first
+  saw after they had started (the first request already carried earlier turns, e.g. a fork), or a subagent without
+  data. Nothing is reconstructed for them.
+
+The start is captured from OpenCode's `prompt` hook (before the agent loop) and confirmed by the first `context`
+hook: that request must contain no earlier assistant or tool turn. Changes are noticed on later model requests; a
+non-read tool aimed at a context path also makes the next request re-list the files. The check stats the files and
+re-hashes only those whose mtime or size changed, so it is cheap, and no tool call scans the file system. As with
+coverage, an edit that keeps both mtime and size is invisible. Zero-read sessions and subagents get a revision record
+like any other.
+
+### Workflow and commands
+
+1. Run `/context-analyze` or `/context-review`, then press **`e`** in the panel (`n`, `f`, `r`, `esc` are unchanged).
+   Name the experiment, state the hypothesis, choose the target context files (the ones the session did not fully
+   read are preselected) and optionally a task category. This records the current revision as the **baseline**.
+2. Edit the documentation yourself.
+3. `/context-experiments` → the experiment → **Check for the documentation change**. The plugin compares the target
+   files with the baseline and shows what changed; if you confirm, that revision becomes the **candidate**. A later
+   revision is never linked automatically, and one that leaves the target files unchanged cannot be confirmed. Other
+   context files that also changed are listed: they confound the comparison.
+4. Let sessions run. In `/context-experiments` choose **Select baseline sessions** and **Select candidate sessions**.
+   Sessions whose whole context matches the anchor revision are listed first; any session can be picked, and ones that
+   do not fit are shown as excluded in the evaluation. A subagent is grouped under its lead: one lead and its subagents
+   are one sample, not several.
+5. Optionally **Label a session's outcome**: your own judgment of task success and instruction adherence, with a note
+   or an evidence reference.
+6. `/context-evaluate` → the experiment. Close an experiment from the same menu; its record stays.
+
+### What is measured
+
+Only deterministic evidence, from the read records, revision records and OpenCode's own message log (derived in the
+TUI, as for `/context-analyze`). Samples are lead sessions; zero-read sessions stay in the denominator.
+
+| group | metric | note |
+| --- | --- | --- |
+| discovery | sessions that read a target file | explicit tool reads only; auto-loaded files are invisible to the hooks, so no read is not proof the agent lacked the content. When every target is auto-loaded the metric is missing, not zero |
+| discovery | target read before the first file change | needs the message log; missing when it is unavailable or the session changed nothing |
+| discovery | target files read completely | judged against the file as it was read |
+| efficiency | repeat reads, cross-agent rereads, failed reads, delivered/requested lines, total context reads | signals only: a repeat is not called wasteful, and none gets a verdict |
+| verification | sessions with a test/check/build-like command, exit code known, non-zero exits | command names are matched locally and never stored; says nothing about whether the work was correct |
+| outcome (labeled) | task success, instruction adherence | only from your labels, and only labels with a note or evidence reference; unlabeled stays unknown |
+
+Each metric shows baseline and candidate sample sizes, values, the absolute change (**percentage points** for rates,
+units for means), the relative change where the baseline is not zero, and how many sessions had no evidence. The
+verdict per metric is `improved`, `regressed`, `unchanged` or `inconclusive`:
+
+* A verdict needs at least 3 sessions per side. A rate change of 20 percentage points or more counts; under 10 is
+  `unchanged`; in between is `inconclusive`. This is descriptive, not a significance test.
+* It is `inconclusive` when samples are too few, evidence is missing, the sides ran on different models or plugin
+  configurations, or other context files changed between the two revisions.
+* The overall verdict is built from the directional metrics (discovery and labeled outcomes) and names them: an
+  `improved` verdict says which metric improved and is not a claim about overall task quality.
+
+Model and plugin-configuration metadata are recorded with each evaluation (never secrets) and differences are listed.
+Each evaluation is stored with the experiment together with its per-session measurements, so it can be recomputed.
+
+### Data
+
+Evaluation metadata lives in `<dataDir>/evaluation/`, apart from the read logs, which are unchanged:
+
+```
+evaluation/snapshots/<revisionId>.json   file paths, hashes, sizes of one revision (written once)
+evaluation/sessions/<sessionID>.json     the revision(s) a session ran under, models, agents
+evaluation/experiments/<id>.json         experiment, selected sessions, labels, stored evaluations
+```
+
+Files carry `version: 1` and are written atomically (temporary file, then rename). A damaged or unknown-version file
+reads as absent and is left in place. Hashes are computed locally; nothing is sent to a model or a service.
+The evaluation RPC methods (`listExperiments`, `createExperiment`, `evaluateExperiment`, …) are additive: update the
+server and TUI together.
 
 ## Options
 
@@ -200,7 +294,7 @@ npm run e2e -- /path/to/opencode2     # real OpenCode sessions with a scripted L
 
 Nothing needs migrating. Existing `<sessionID>.jsonl` files are read as before; their records lack the new optional
 fields, so their coverage is labelled estimated and their sessions *reads only*. New data is written next to them
-(`sessions/`, `tracking.json`). Downgrading is safe: older versions ignore the new fields and files. The RPC gained
+(`sessions/`, `tracking.json`, `evaluation/`). Downgrading is safe: older versions ignore the new fields and files. The RPC gained
 fields (`tracking`, `certainty`, `agents`, …), so update the server and TUI halves together.
 
 ## E2E test
@@ -220,6 +314,13 @@ real; **only the LLM is a scripted OpenAI-compatible stub** (`e2e/mock-llm.mjs`)
 | D | answers without any tool call | a zero-read session is still observed |
 | E → S | E delegates to a subagent, which reads | subagent attribution, `parentSessionID`, original call IDs |
 | F → N | F delegates to a subagent that reads only a non-context file | a subagent with zero context reads is still an observed child of its spawner |
+| G | writes `.ai/style.md` itself, then reads `AGENTS.md` (run alone, after A-F) | a context change during a session makes it `mixed` |
+| H, I, J → K | after G: H reads `.ai/style.md`, I reads nothing, J delegates the read to K (run together) | sessions on the new revision share one id; a lead and its subagent are one sample |
+
+The first six sessions are asserted before G, H, I and J run (they add sessions). Then `test/e2e-evaluation.test.ts`
+restores the pre-change `style.md`, creates an experiment on the real data (its baseline id must equal the one the
+live sessions recorded), confirms the change as the candidate, selects the sessions (including mixed G by mistake) and
+checks the exclusion, the grouping, the metrics and the verdict.
 
 Limitations: the E2E does not drive the terminal UI, so the child-session discovery used by `/context-analyze`
 (`session.list({ parentID })`) is covered by unit tests with a fake listing, not live. OpenCode's stock subagents cannot spawn further agents, so nested delegation is covered by unit tests

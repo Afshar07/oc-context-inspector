@@ -145,7 +145,7 @@ describe("plugin session tracking", () => {
     withTempDir(async (dir) => {
       const { ctx, sessionHooks } = fakeContext(dir, {}, { dataDir: "out" });
       await plugin.setup(ctx);
-      expect(Object.keys(sessionHooks)).toEqual(["context"]);
+      expect(Object.keys(sessionHooks).sort()).toEqual(["context", "prompt"]);
       await sessionHooks.context!({ sessionID: "chatty", agent: "build", system: [], messages: [] });
       await new Promise((r) => setTimeout(r, 50));
       const registry = new SessionRegistry(path.join(dir, "out"));

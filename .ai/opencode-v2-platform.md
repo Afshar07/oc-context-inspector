@@ -6,6 +6,7 @@ Verified against `@opencode/plugin@2.0.32` and `opencode` CLI `2.0.32` (the pinn
 
 - Server: `Plugin.define({ id, setup(ctx) })` from `@opencode/plugin`. Used: `ctx.options`, `ctx.location.directory`, `ctx.tool.hook("execute.before"|"execute.after")`, `ctx.session.hook("context")`, `ctx.session.get`, `ctx.rpc.register`, `ctx.generate.text`, `ctx.model.default`.
 - TUI: `Plugin.define` from `@opencode/plugin/tui`. Used: `ctx.ui.slot/panel/dialog/toast/tabs/router`, `ctx.keymap.layer/mode`, `ctx.storage.store`, `ctx.data.session` (`get`, `message.sync/list`), `ctx.client.session` (`fork`, `create`, `update`, `switchModel`, `synthetic`, `list`), `ctx.rpc` client.
+- Session hooks: `prompt` fires before the agent loop, for root sessions and subagents alike (live: every e2e session got a `prompt` capture). `context` fires on every model request, not once, and its event carries `messages` (roles), `model` and `agent`; the first request of a new session has no assistant or tool message, a fork or resumed session does. The first sight of a session through `context` is therefore not proof of its start.
 - `ctx.generate.text` runs outside the conversation, so analysis never changes the session.
 
 ## Tool facts

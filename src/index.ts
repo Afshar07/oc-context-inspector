@@ -1,7 +1,15 @@
 import { Plugin } from "@opencode/plugin";
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import { AnalysisService } from "./analysis.js";
 import { CoverageService } from "./coverage.js";
+import { EvaluationService } from "./evaluation/evaluate.js";
+import { ExperimentService } from "./evaluation/experiments.js";
+import { GroupResolver } from "./evaluation/groups.js";
+import { evaluationHandlers, type IEvaluationServices } from "./evaluation/rpc-handlers.js";
+import { RevisionSnapshotter } from "./evaluation/revisions.js";
+import { SessionRevisionTracker } from "./evaluation/session-revisions.js";
+import { EvaluationStore } from "./evaluation/store.js";
 import { ContextPathMatcher, DEFAULT_CONTEXT_PATHS } from "./matcher.js";
 import { formatModelRef, parseModelRef } from "./model-ref.js";
 import { ContextInspectorRpc } from "./rpc.js";
@@ -15,6 +23,7 @@ export { ContextInspectorRpc } from "./rpc.js";
 export { readSessionRecords } from "./store.js";
 export { SessionObserver, SessionRegistry } from "./sessions.js";
 export { parseModelRef } from "./model-ref.js";
+export * from "./evaluation/types.js";
 export * from "./types.js";
 
 function stringList(value: unknown, fallback: readonly string[]): readonly string[] {
@@ -44,7 +53,19 @@ export function resolveOptions(
 const failure = (error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) });
 
 
-function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: AnalysisService, configured?: IModelRef) {
+/** Identifies the plugin options that shape what is tracked, so sessions run under different settings are not pooled. */
+function environmentSignature(options: IContextInspectorOptions): string {
+  const parts = [[...options.contextPaths].sort(), [...options.tools].sort(), [...options.autoLoaded].sort()];
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 12);
+}
+
+function registerRpc(
+  ctx: Plugin.Context,
+  coverage: CoverageService,
+  analysis: AnalysisService,
+  evaluation: IEvaluationServices,
+  configured?: IModelRef,
+) {
   // Resolved per call and passed explicitly, so the label shown is the model that actually ran.
   const resolveModel = async (): Promise<IModelRef | undefined> => {
     if (configured) return configured;
@@ -78,6 +99,7 @@ function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: A
         }),
       })).catch(failure),
     reviewProject: ({ model }) => withModel(model, (m) => analysis.reviewProject(m)).catch(failure),
+    ...evaluationHandlers(evaluation),
   });
 }
 
@@ -97,10 +119,24 @@ export default Plugin.define({
       registry,
     );
 
+    // Evaluation metadata lives apart from the read logs, under `<dataDir>/evaluation/`.
+    const evaluationStore = new EvaluationStore(options.dataDir);
+    const snapshotter = new RevisionSnapshotter(ctx.location.directory, () => coverage.listContextFiles());
+    const groups = new GroupResolver(registry, evaluationStore);
+    const experiments = new ExperimentService({ store: evaluationStore, snapshotter, matcher, groups });
+    const evaluation = new EvaluationService({
+      experiments,
+      groups,
+      store: evaluationStore,
+      dataDir: options.dataDir,
+      autoLoaded: options.autoLoaded,
+    });
+    const revisions = new SessionRevisionTracker(evaluationStore, snapshotter, environmentSignature(options));
+
     // Serves the TUI sidebar. Recording must keep working if RPC is unavailable.
     let rpc: Awaited<ReturnType<typeof registerRpc>> | undefined;
     try {
-      rpc = await registerRpc(ctx, coverage, analysis, options.analysis.model);
+      rpc = await registerRpc(ctx, coverage, analysis, { experiments, evaluation, groups, snapshotter }, options.analysis.model);
     } catch {}
 
     const jsonl = new JsonlContextReadStore(options.dataDir);
@@ -121,10 +157,33 @@ export default Plugin.define({
     const tracker = new ContextReadTracker(matcher, new Set(options.tools), store, undefined, { sessions: observer });
     startTracking(options.dataDir).catch(() => {});
 
-    // A session that only talks (no tool call) still ran, so a zero-read session is a fact, not a gap.
+    // The prompt arrives before the agent loop: an early snapshot of the context for a new session.
+    // Observation only; a failure here must never hold up or alter the prompt.
     try {
-      await ctx.session.hook("context", (event) => {
+      await ctx.session.hook("prompt", async (event) => {
+        try {
+          await revisions.observe({ sessionID: event.sessionID, source: "prompt" });
+        } catch {}
+      });
+    } catch {}
+
+    // A session that only talks (no tool call) still ran, so a zero-read session is a fact, not a gap.
+    // The hook may fire for every model request, so revision capture is idempotent and cheap after the first.
+    try {
+      await ctx.session.hook("context", async (event) => {
         observer.observe(event.sessionID).catch(() => {});
+        try {
+          const { model, agent, messages } = event;
+          await revisions.observe({
+            sessionID: event.sessionID,
+            source: "context",
+            // A first request with no assistant or tool turn is the start of the session; anything else began earlier.
+            // Without a message list the history is unknown, which is treated as "has history".
+            priorTurns: messages?.some((m) => m.role === "assistant" || m.role === "tool") ?? true,
+            ...(model && { model: formatModelRef({ providerID: model.providerID, id: model.id, ...(model.variant !== undefined && { variant: model.variant }) }) }),
+            ...(agent !== undefined && { agent }),
+          });
+        } catch {}
       });
     } catch {}
 
@@ -132,6 +191,13 @@ export default Plugin.define({
     await ctx.tool.hook("execute.before", (event) => {
       try {
         tracker.onBefore(event);
+        // A non-read tool aimed at a context file may change it: re-list the files at the next model request.
+        // Only a path match, so a tool call never scans the file system.
+        if (!options.tools.includes(event.tool)) {
+          const args = event.input as { path?: unknown; filePath?: unknown } | null | undefined;
+          const target = typeof args?.path === "string" ? args.path : typeof args?.filePath === "string" ? args.filePath : undefined;
+          if (target !== undefined && matcher.match(target)) snapshotter.invalidate();
+        }
       } catch {}
     });
     await ctx.tool.hook("execute.after", async (event) => {

@@ -23,13 +23,20 @@ Run typecheck and tests for any change in `src/`. Run a single file with `npx vi
 | RPC | `rpc.test.ts` |
 | TUI logic | `tui.test.ts`, `tui-coverage.test.ts`, `markdown.test.ts`, `handoff.test.ts` |
 | Timeline, descendant-session discovery | `timeline.test.ts`, `descendants.test.ts`; read-key joining in `analysis.test.ts` |
-| Real E2E output | `e2e-output.test.ts` (reads data produced by `e2e/run.sh`) |
+| Real E2E output | `e2e-output.test.ts`, `e2e-evaluation.test.ts` (read data produced by `e2e/run.sh`) |
+| Revisions: ids, diffs, snapshotter, session classification | `revisions.test.ts`, `session-revisions.test.ts` |
+| Experiments: lifecycle, selection, labels, persistence | `experiments.test.ts` |
+| Metrics, comparison, evaluation service | `evaluation.test.ts` |
+| Evaluation RPC schemas, activity summary, plugin wiring | `evaluation-rpc.test.ts`, `plugin-evaluation.test.ts` |
+| Experiment TUI logic (formatting, dialogs, keymaps) | `tui-evaluation.test.ts` |
+
+Evaluation tests build a project in a temp dir with `makeHarness` (`test/evaluation-helpers.ts`): real services, no mocks; the snapshotter has no list caching there.
 
 Helpers in `test/helpers.ts`: `MemoryStore`, `StepClock` (deterministic timestamps), `makeTracker`, `withTempDir`. Prefer them over new fakes; the code takes collaborators through constructors (`IContextReadStore`, `IClock`, injected `Generate`, `ITrackerDeps`) so tests need no mocking framework.
 
 ## E2E
 
-`e2e/run.sh` copies `e2e/project`, runs six concurrent `opencode run` sessions (A-F plus the subagents S and N) against a free port with isolated OpenCode state, then runs `e2e/assert.mjs` and `test/e2e-output.test.ts`. Only the LLM is faked (`e2e/mock-llm.mjs`, OpenAI-compatible stub). `E2E_KEEP=1` keeps the temp dir. The scenario table lives in the root `README.md`; extend both when adding a scenario.
+`e2e/run.sh` copies `e2e/project`, runs six concurrent `opencode run` sessions (A-F plus the subagents S and N) against a free port with isolated OpenCode state, then runs `e2e/assert.mjs` and `test/e2e-output.test.ts`. Only the LLM is faked (`e2e/mock-llm.mjs`, OpenAI-compatible stub). `E2E_KEEP=1` keeps the temp dir. Wave 1 (A-F) is asserted first because later sessions change the counts; then G (edits a context file mid-session, run alone) and H/I/J(+K) (after the change) run, and `e2e-evaluation.test.ts` builds an experiment on the real data. The scenario table lives in the root `README.md`; extend both when adding a scenario.
 
 ## CI
 

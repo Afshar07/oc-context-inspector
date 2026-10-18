@@ -3,6 +3,9 @@ import { Plugin } from "@opencode/plugin/tui";
 import { createSignal, Match, Show, Switch } from "solid-js";
 import type { IFileCoverage } from "../types.js";
 import { Analysis, type EAnalysisMode } from "./Analysis.js";
+import { Evaluation } from "./Evaluation.js";
+import { rpcExperimentClient } from "./experiment-client.js";
+import { experimentFlows } from "./experiment-flow.js";
 import { DEFAULT_MODEL, pickAnalysisModel, rpcCoverageClient, startFollowUpSession, userPrompts } from "./client.js";
 import { describeFile, STATUS_GLYPH, visibleFiles } from "./format.js";
 import { handoffMessage } from "./handoff.js";
@@ -11,6 +14,7 @@ import { Sidebar } from "./Sidebar.js";
 import type { ICoverageClient } from "./source.js";
 
 const PANEL_NAME = "context-inspector.preview";
+const EVALUATION_PANEL = "context-inspector.evaluate";
 const ANALYSIS_PANELS: Readonly<Record<EAnalysisMode, string>> = {
   session: "context-inspector.analysis.session",
   project: "context-inspector.analysis.project",
@@ -22,7 +26,9 @@ export default Plugin.define({
   id: "opencode-context-inspector",
   setup(ctx) {
     const client = rpcCoverageClient(ctx);
+    const experimentClient = rpcExperimentClient(ctx);
     const [selected, setSelected] = createSignal<string>();
+    const [evaluating, setEvaluating] = createSignal<string>();
     // Durable, so the choice survives TUI restarts.
     const [prefs, setPrefs] = ctx.storage.store("prefs", { initial: { showUnread: false, collapsed: false, analysisModel: DEFAULT_MODEL } });
     // Model picked for the analysis panel currently open; read by its resource, so a new pick reruns it.
@@ -82,6 +88,28 @@ export default Plugin.define({
       const route = ctx.ui.router.current();
       return route.type === "session" ? route.sessionID : undefined;
     };
+    const openEvaluation = (id: string) => {
+      setEvaluating(id);
+      if (!ctx.ui.panel.open(EVALUATION_PANEL)) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
+    };
+    const flows = experimentFlows(ctx, experimentClient, {
+      openEvaluation,
+      coverageFiles: async (sessionID) => (await client.coverage(sessionID).catch(() => undefined))?.files,
+    });
+    // The analysis panel's `e`: the experiment is about the project's context files, seen from the reviewed session.
+    const startExperiment = (mode: EAnalysisMode, sessionID: string) => async () => {
+      const report = await client.coverage(sessionID).catch(() => undefined);
+      if (!report) {
+        ctx.ui.toast.show({ variant: "error", message: "Could not read the context files" });
+        return;
+      }
+      // The review stays open behind the dialogs: its text is what the hypothesis is written from.
+      await flows.createFromAnalysis(
+        sessionID,
+        mode === "session" ? { kind: "session-analysis", sessionID } : { kind: "project-review", sessionID },
+        report.files,
+      );
+    };
 
     const disposers = [
       ctx.ui.slot({
@@ -114,6 +142,7 @@ export default Plugin.define({
                 mode="session"
                 model={analysisModel()}
                 onContinue={continueInSession("session", input.sessionID)}
+                onExperiment={() => void startExperiment("session", input.sessionID)()}
               />
             </Match>
             <Match when={input.name === ANALYSIS_PANELS.project}>
@@ -124,7 +153,11 @@ export default Plugin.define({
                 mode="project"
                 model={analysisModel()}
                 onContinue={continueInSession("project", input.sessionID)}
+                onExperiment={() => void startExperiment("project", input.sessionID)()}
               />
+            </Match>
+            <Match when={input.name === EVALUATION_PANEL && evaluating()}>
+              {(id) => <Evaluation ctx={ctx} client={experimentClient} panel={input} experimentId={id()} />}
             </Match>
           </Switch>
         ),
@@ -177,6 +210,34 @@ export default Plugin.define({
                 run: () => {
                   const sessionID = currentSession();
                   if (sessionID) void openAnalysis("project", sessionID);
+                },
+              },
+              {
+                id: "context-inspector.experiments",
+                title: "Context experiments",
+                description: "List, inspect and manage experiments that test a documentation change",
+                group: "Session",
+                palette: true,
+                slash: { name: "context-experiments" },
+                enabled: () => currentSession() !== undefined,
+                run: () => {
+                  const sessionID = currentSession();
+                  if (sessionID) void flows.manage(sessionID);
+                },
+              },
+              {
+                id: "context-inspector.evaluate",
+                title: "Evaluate a context experiment",
+                description: "Compare sessions before and after a documentation change",
+                group: "Session",
+                palette: true,
+                slash: { name: "context-evaluate" },
+                enabled: () => currentSession() !== undefined,
+                run: async () => {
+                  const sessionID = currentSession();
+                  if (!sessionID) return;
+                  const id = await flows.chooseForEvaluation(sessionID);
+                  if (id) openEvaluation(id);
                 },
               },
               {

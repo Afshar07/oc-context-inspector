@@ -16,6 +16,8 @@ export interface IAnalysisProps {
   readonly model: string | undefined;
   /** Opens a follow-up session seeded with this answer: a new session, or a fork of the analyzed one. */
   readonly onContinue: (answer: Extract<IAnalysisResult, { ok: true }>, fork: boolean) => Promise<void>;
+  /** Starts the create-experiment dialogs for the reviewed session (or project). Nothing runs or changes until the user confirms. */
+  readonly onExperiment: () => void;
 }
 
 const TITLES: Readonly<Record<EAnalysisMode, string>> = {
@@ -53,6 +55,7 @@ export function Analysis(props: IAnalysisProps) {
       { title: "Continue in a new session", bind: "n", run: () => void continueInSession(false) },
       // A fork carries the whole conversation, so it costs more tokens; only a session analysis can be forked.
       { title: "Continue in a fork of this session", bind: "f", run: () => void (props.mode === "session" && continueInSession(true)) },
+      { title: "Create a context experiment", bind: "e", run: () => void (result()?.ok && props.onExperiment()) },
     ],
   }));
 
@@ -90,7 +93,7 @@ export function Analysis(props: IAnalysisProps) {
           const legacy = r?.ok && r.readsOnlySessions ? ` (${r.readsOnlySessions} older, reads only)` : "";
           const sessions = r?.ok && r.sessionCount !== undefined ? `${r.sessionCount} sessions${legacy} · ` : "";
           if (continuing()) return "Opening a session…";
-          const next = r?.ok ? (props.mode === "session" ? "n new session · f fork · " : "n new session · ") : "";
+          const next = r?.ok ? (props.mode === "session" ? "n new session · f fork · e experiment · " : "n new session · e experiment · ") : "";
           return `${model}${sessions}${next}r rerun · esc close`;
         })()}
       </text>

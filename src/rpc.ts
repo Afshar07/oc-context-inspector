@@ -1,6 +1,15 @@
 import { Rpc } from "@opencode/plugin/rpc";
 import { Schema } from "effect";
 import {
+  CandidateDetection,
+  EvaluationResult,
+  Experiment,
+  GroupRevision,
+  SessionActivity,
+  SessionOffer,
+} from "./evaluation/rpc-schema.js";
+import { EAdherence, EExperimentRole, ETaskOutcome } from "./evaluation/types.js";
+import {
   EAgentRole,
   ECoverageCertainty,
   ECoverageStatus,
@@ -99,6 +108,10 @@ sameShape<(typeof TimelineEvent)["Type"], ITimelineEvent>((a) => a);
 sameShape<ITimelineSessionInfo, (typeof TimelineSession)["Type"]>((a) => a);
 sameShape<(typeof TimelineSession)["Type"], ITimelineSessionInfo>((a) => a);
 
+const ExperimentOk = Schema.Struct({ ok: Schema.Literal(true), experiment: Experiment });
+const ExperimentReply = Schema.Union([ExperimentOk, Failure]);
+const SessionRole = Schema.Struct({ sessionID: Schema.String, role: Schema.Enum(EExperimentRole) });
+
 /** Shared by the server entry (registers handlers) and the TUI entry (calls them). */
 export const ContextInspectorRpc = Rpc.define({
   id: "context-inspector",
@@ -152,6 +165,88 @@ export const ContextInspectorRpc = Rpc.define({
           Schema.Struct({ found: Schema.Literal(false) }),
         ]),
       ),
+    },
+    /** Context revision a session (with its subagents) ran under; `unknown` when it cannot be established. */
+    sessionRevision: {
+      input: portable(Schema.Struct({ sessionID: Schema.String })),
+      output: portable(GroupRevision),
+    },
+    /** Revision of the project's context files right now. */
+    currentRevision: {
+      input: portable(Schema.Struct({})),
+      output: portable(Schema.Struct({ revisionId: Schema.String, fileCount: Schema.Number, createdAt: Schema.String })),
+    },
+    listExperiments: {
+      input: portable(Schema.Struct({})),
+      output: portable(Schema.Struct({ experiments: Schema.Array(Experiment), unreadable: Schema.Number })),
+    },
+    /** Records a baseline from the current context. Edits no file and starts no agent. */
+    createExperiment: {
+      input: portable(
+        Schema.Struct({
+          name: Schema.String,
+          hypothesis: Schema.String,
+          targetFiles: Schema.Array(Schema.String),
+          taskCategory: Schema.optionalKey(Schema.String),
+          description: Schema.optionalKey(Schema.String),
+          baselineSessionIDs: Schema.optionalKey(Schema.Array(Schema.String)),
+          origin: Schema.optionalKey(
+            Schema.Struct({
+              kind: Schema.Literals(["session-analysis", "project-review", "manual"]),
+              sessionID: Schema.optionalKey(Schema.String),
+            }),
+          ),
+        }),
+      ),
+      output: portable(ExperimentReply),
+    },
+    closeExperiment: {
+      input: portable(Schema.Struct({ id: Schema.String, reason: Schema.optionalKey(Schema.String) })),
+      output: portable(ExperimentReply),
+    },
+    /** Does the current context differ from the baseline in the target files? Changes nothing. */
+    detectCandidate: {
+      input: portable(Schema.Struct({ id: Schema.String })),
+      output: portable(Schema.Union([Schema.Struct({ ok: Schema.Literal(true), detection: CandidateDetection }), Failure])),
+    },
+    confirmCandidate: {
+      input: portable(Schema.Struct({ id: Schema.String, revisionId: Schema.String })),
+      output: portable(ExperimentReply),
+    },
+    /** Lead sessions with their revision and how well they fit the experiment. */
+    experimentSessions: {
+      input: portable(Schema.Struct({ id: Schema.String })),
+      output: portable(Schema.Union([Schema.Struct({ ok: Schema.Literal(true), offers: Schema.Array(SessionOffer) }), Failure])),
+    },
+    setExperimentSessions: {
+      input: portable(
+        Schema.Struct({
+          id: Schema.String,
+          add: Schema.optionalKey(Schema.Array(SessionRole)),
+          remove: Schema.optionalKey(Schema.Array(Schema.String)),
+        }),
+      ),
+      output: portable(ExperimentReply),
+    },
+    /** A human judgment about one selected session. Stored as typed; never inferred. */
+    labelSession: {
+      input: portable(
+        Schema.Struct({
+          id: Schema.String,
+          sessionID: Schema.String,
+          taskSuccess: Schema.optionalKey(Schema.Enum(ETaskOutcome)),
+          adherence: Schema.optionalKey(Schema.Enum(EAdherence)),
+          note: Schema.optionalKey(Schema.String),
+          evidenceRef: Schema.optionalKey(Schema.String),
+          clear: Schema.optionalKey(Schema.Boolean),
+        }),
+      ),
+      output: portable(ExperimentReply),
+    },
+    /** Compares baseline and candidate sessions. `activity` (counts from the message log) comes from the TUI; absent from older TUIs. */
+    evaluateExperiment: {
+      input: portable(Schema.Struct({ id: Schema.String, activity: Schema.optionalKey(Schema.Array(SessionActivity)) })),
+      output: portable(Schema.Union([Schema.Struct({ ok: Schema.Literal(true), result: EvaluationResult }), Failure])),
     },
   },
   events: {

@@ -74,7 +74,6 @@ done
 grep -q "mock llm on" "$LOGS/mock.log" || { echo "e2e: mock LLM did not start in time" >&2; exit 1; }
 
 # Each session gets its own OpenCode state, so only the plugin's data directory is shared between them.
-SESSIONS=(A B C D E F)
 run_session() {
   local name="$1" state="$SANDBOX/state-$1"
   mkdir -p "$state"
@@ -85,21 +84,27 @@ run_session() {
     $T "$OC" run --standalone --auto --title "$name" "SCENARIO-$name read the context" > "$LOGS/session-$name.log" 2>&1
   )
 }
-for name in "${SESSIONS[@]}"; do
-  run_session "$name" &
-  RUN_PIDS+=($!)
-done
 
-failed=0
-for i in "${!SESSIONS[@]}"; do
-  if ! wait "${RUN_PIDS[$i]}"; then
-    echo "e2e: session ${SESSIONS[$i]} failed (nonzero exit)" >&2
-    tail -n 30 "$LOGS/session-${SESSIONS[$i]}.log" >&2 || true
-    failed=1
-  fi
-done
-RUN_PIDS=()
-[ "$failed" = "0" ] || { echo "e2e: FAILED while running sessions" >&2; exit 1; }
+# Runs the named sessions concurrently and fails the whole run if any of them exits nonzero.
+run_wave() {
+  local names=("$@") pids=() failed=0
+  for name in "${names[@]}"; do
+    run_session "$name" &
+    pids+=($!)
+    RUN_PIDS+=($!)
+  done
+  for i in "${!names[@]}"; do
+    if ! wait "${pids[$i]}"; then
+      echo "e2e: session ${names[$i]} failed (nonzero exit)" >&2
+      tail -n 30 "$LOGS/session-${names[$i]}.log" >&2 || true
+      failed=1
+    fi
+  done
+  RUN_PIDS=()
+  [ "$failed" = "0" ] || { echo "e2e: FAILED while running sessions" >&2; exit 1; }
+}
+
+run_wave A B C D E F
 
 DATA="$PROJECT/.opencode/context-inspector"
 echo "--- recorded files ---"
@@ -111,5 +116,18 @@ node "$ROOT/e2e/assert.mjs" "$(native "$DATA")" || { echo "e2e: FAILED raw asser
 echo "--- service-level assertions (coverage, analysis) ---"
 (cd "$ROOT" && E2E_PROJECT_DIR="$(native "$PROJECT")" npx --no-install vitest run test/e2e-output.test.ts) \
   || { echo "e2e: FAILED service-level assertions" >&2; exit 1; }
+
+# Wave 2 and 3 exercise context revisions. They add sessions, so they run after every wave-1 assertion.
+# The documentation is changed by a session itself (G, mid-session); H, I and J then start on the new revision.
+cp "$PROJECT/.ai/style.md" "$SANDBOX/style.before.md"
+echo "--- wave 2: a session that edits a context file while it runs ---"
+run_wave G
+cp "$PROJECT/.ai/style.md" "$SANDBOX/style.after.md"
+cmp -s "$SANDBOX/style.before.md" "$SANDBOX/style.after.md" && { echo "e2e: FAILED: session G did not change .ai/style.md" >&2; exit 1; }
+echo "--- wave 3: sessions started after the documentation change ---"
+run_wave H I J
+
+echo "--- context revisions and experiments ---"
+(cd "$ROOT" && E2E_PROJECT_DIR="$(native "$PROJECT")" E2E_STYLE_BEFORE="$(native "$SANDBOX/style.before.md")" E2E_STYLE_AFTER="$(native "$SANDBOX/style.after.md")"   npx --no-install vitest run test/e2e-evaluation.test.ts)   || { echo "e2e: FAILED revision and experiment assertions" >&2; exit 1; }
 
 echo "e2e: OK"

@@ -78,7 +78,7 @@ export async function userPrompts(ctx: Plugin.Context, sessionID: string): Promi
 }
 
 /** Direct children of a session, all pages, through OpenCode's session listing. */
-async function listChildSessions(ctx: Plugin.Context, parentID: string): Promise<ISessionNode[]> {
+export async function listChildSessions(ctx: Plugin.Context, parentID: string): Promise<ISessionNode[]> {
   const found: ISessionNode[] = [];
   let cursor: string | undefined;
   do {

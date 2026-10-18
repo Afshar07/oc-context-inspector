@@ -32,6 +32,17 @@ Contracts a change must not break unless the task explicitly changes them. Each 
 - Tool call ids repeat across sessions (lead and subagents). A read record is identified by `(sessionID, callID)`, never `callID` alone. **Why:** a single-key map let one agent's record overwrite another's and misattributed delivered ranges.
 - A session the timeline knows but could not load is reported as unavailable, never silently omitted; the review must not infer that it did nothing.
 
+## Context revisions and experiments
+
+- Evaluation data lives only under `<dataDir>/evaluation/`; read records and session markers are never changed for it. Every file has `version: 1`; a damaged or unknown-version file reads as absent and is left on disk. Writes are atomic (temp file + rename); snapshots are content-addressed and written once.
+- Only paths, hashes, sizes, timestamps, model/agent labels and user-typed labels are stored. No prompts, file bodies, credentials or command text. Test-like shell commands are recognized in the TUI and only counts leave it.
+- A revision id depends only on sorted project-relative paths and file bytes (code-point order, POSIX separators), never on locale, time or machine. Do not add fields to the hash input without a version bump.
+- A session's start revision is established only by a first model request with no assistant/tool turn. Anything first seen later is `Late` and stays unknown; never reconstruct a start. A change seen on a later request makes the session mixed; a mixed or unknown session is never a clean sample.
+- No tool call scans the file system. Hooks stay observation-only: events are never written to, and every hook body is wrapped so a failure cannot reach the agent.
+- A candidate revision is linked only by explicit confirmation and only if the target files differ from the baseline. Experiments never edit `AGENTS.md`/`.ai/**`, revert anything, or start agents.
+- One lead plus its subagents is one sample. Missing evidence (no message log, no delivery info, auto-loaded targets, unlabeled outcomes) is reported as missing, never as zero or failure. Outcome rates use only labels with a note or evidence reference. Efficiency and verification metrics are signals without verdicts.
+- A verdict is `inconclusive` when samples are few, evidence is incomplete, models/configuration differ, or other context files changed between the anchor revisions. An overall `improved` names the metrics; it is not a claim about task quality. No AI-generated verdicts.
+
 ## Determinism
 
 - `ContentBudget` allocates sequentially after all files are loaded, in path order, so which file is truncated never depends on timing.

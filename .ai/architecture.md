@@ -24,6 +24,7 @@ Both halves share `id: "opencode-context-inspector"` and `src/types.ts`. Update 
 | `coverage.ts` | `CoverageService`: per-file status, merged ranges, certainty, changed/deleted detection, per-agent repeat/handoff accounting, file preview |
 | `analysis.ts` | `AnalysisService`: builds the session and project prompts (session prompt includes the timeline: `formatTimeline`, `readKey`), `aggregateUsage`, outlines/sections, `ContentBudget`. Calls an injected `Generate` |
 | `rpc.ts` | `ContextInspectorRpc` schema (`coverage`, `preview`, `analyzeSession` with optional `timeline`, `reviewProject`, `read` event) |
+| `evaluation/*` | Context revisions and experiments (see below). Own types (`evaluation/types.ts`), own store, own RPC schemas (`rpc-schema.ts`, merged into `rpc.ts`) |
 | `model-ref.ts` | `provider/model[#variant]` parse and format |
 | `types.ts` | All shared types. `E*` enums, `I*` interfaces |
 
@@ -46,12 +47,42 @@ Both halves share `id: "opencode-context-inspector"` and `src/types.ts`. Update 
 - **Prompt contract** (`buildSessionPrompt` in `analysis.ts`): ordered timeline with reads inlined, then findings with one category (`context-discovery`, `instruction-adherence`, `verification-reporting`), evidence, triggering action, quoted instruction, before-the-action, confidence (`confirmed` needs the quote and the ordering) and one remedy (`agent-oversight`, `ambiguous-routing`, `missing-documentation`, `tracking-limitation`). A clear instruction is never a documentation remedy. Without a timeline the prompt says ordering is unknown. The answer ends with a one-line summary of what reached the model.
 - Event caps (300, essential events kept) live in `timeline.ts`; the follow-up handoff is unchanged by the timeline.
 
+## Context revisions and experiments (`src/evaluation/`)
+
+Measurement infrastructure: it records which version of the context an agent had and compares sessions before and
+after a documentation change. It never edits documentation, runs agents or calls a model. Domain rules are in `invariants.md`.
+
+| File | Responsibility |
+| --- | --- |
+| `types.ts` | `IRevisionSnapshot`, `ISessionRevisionRecord`, `IExperiment`, `IEvaluationResult`, enums. Schema version constant |
+| `revisions.ts` | Revision ids (sorted paths + SHA-256), `diffSnapshots` (added/removed/modified/renamed), `RevisionSnapshotter` (cached list, hash cache keyed by mtime+size, single-flight), `classifySessionRevision` |
+| `session-revisions.ts` | `SessionRevisionTracker`: per-session queue; start revision from the first `context` request (earlier `prompt` snapshot kept provisional); later requests append changed revisions |
+| `groups.ts` | `GroupResolver`: lead sessions, a lead plus its subagents as one unit, the group's revision state |
+| `store.ts`, `json-file.ts` | `EvaluationStore` (snapshots, session records, experiments); atomic JSON write and tolerant read |
+| `experiments.ts` | `ExperimentService`: create/validate/dedupe, detect and confirm the candidate, session offers and selection, outcome labels, close. Per-experiment lock |
+| `metrics.ts` | `measureGroup`: deterministic per-group measurements from read records and activity |
+| `comparison.ts` | `compareGroups`, per-metric verdicts, `overallVerdict`, comparability and limitations. Thresholds are `DEFAULT_SETTINGS` |
+| `evaluate.ts` | `EvaluationService`: selects clean samples, records exclusions with reasons, builds and stores the result |
+| `activity.ts` | `summarizeActivity` (pure; used by the TUI): first file change, shell and test-like run counts from the message log. Returns counts only |
+| `rpc-handlers.ts` | Handlers merged into the plugin RPC; user mistakes (`ExperimentError`) come back as `{ ok: false, error }` |
+
+Wiring (`src/index.ts`): `ctx.session.hook("prompt")` and `("context")` feed the tracker (both awaited inside try/catch);
+`execute.before` only calls `snapshotter.invalidate()` when a non-read tool targets a context path (a path match, no scan).
+
+TUI: `experiment-client.ts` (RPC adapter; gathers `ISessionActivity` per lead session before `evaluateExperiment`),
+`experiment-flow.ts` (dialogs: create from an analysis, manage, candidate confirmation, session selection, labels),
+`Evaluation.tsx` + `evaluation-format.ts` (panel and pure formatting). `Analysis.tsx` binds `e`; `index.tsx` registers
+`/context-experiments` and `/context-evaluate`.
+
 ## On-disk layout (`<project>/.opencode/context-inspector/`, git-ignored)
 
 ```
 <sessionID>.jsonl        one record per context read
 sessions/<sessionID>.json  observation marker, written once
 tracking.json            when session tracking began
+evaluation/snapshots/<revisionId>.json     paths, SHA-256, sizes of one revision (content-addressed, written once)
+evaluation/sessions/<sessionID>.json       revision(s) a session ran under, models, agents
+evaluation/experiments/<id>.json           experiment, selected sessions, labels, stored evaluations
 ```
 
 ## Follow-up sessions

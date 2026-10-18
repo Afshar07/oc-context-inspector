@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { ESessionLineage, IContextReadRecord, IContextReadStore } from "./types.js";
 
 /** Session IDs become file names; keep them from escaping the data directory. */
-function safeName(sessionID: string): string {
+export function safeName(sessionID: string): string {
   return sessionID.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 

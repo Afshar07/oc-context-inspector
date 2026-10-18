@@ -35,6 +35,17 @@ const SCRIPTS = {
   // Delegates to a subagent that never reads a context file (SCENARIO-N): it must still be discoverable as a child session.
   "SCENARIO-F": [["subagent", { agent: "general", description: "Inspect source", prompt: "SCENARIO-N inspect the source" }]],
   "SCENARIO-N": [["read", { path: "src/app.ts" }]],
+  // Wave 2: edits a context file itself, so the context changes while the session runs.
+  "SCENARIO-G": [
+    ["write", { path: ".ai/style.md", content: "# Style\n\nUse spaces, not tabs.\nKeep functions short.\n" }],
+    ["read", { path: "AGENTS.md" }],
+  ],
+  // Wave 3: sessions that start after the documentation change. H reads the changed file, I reads nothing,
+  // J delegates the reading to a subagent (K).
+  "SCENARIO-H": [["read", { path: ".ai/style.md" }]],
+  "SCENARIO-I": [],
+  "SCENARIO-J": [["subagent", { agent: "general", description: "Read style", prompt: "SCENARIO-K read the style guide" }]],
+  "SCENARIO-K": [["read", { path: ".ai/style.md" }]],
   "SCENARIO-B": [
     ["read", { path: ".ai/style.md", limit: 5 }],
     ["read", { path: "AGENTS.md", offset: 2 }],

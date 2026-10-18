@@ -108,8 +108,32 @@ const zeroRead = children.find((m) => m.sessionID !== sub);
 check("N (zero context reads) is a child of a root session that also read nothing", zeroRead !== undefined && markers.some((m) => m.sessionID === zeroRead.parentSessionID && m.lineage === "root") && !bySession.has(zeroRead.sessionID) && !bySession.has(zeroRead.parentSessionID));
 check("tracking start is recorded", existsSync(path.join(dataDir, "tracking.json")));
 
+// --- context revisions (evaluation/): captured for every observed session, zero-read ones and subagents included ----------
+const evalDir = path.join(dataDir, "evaluation");
+const revisionFiles = existsSync(path.join(evalDir, "sessions")) ? readdirSync(path.join(evalDir, "sessions")).filter((n) => n.endsWith(".json")) : [];
+const revisions = revisionFiles.map((n) => readJson(path.join(evalDir, "sessions", n)));
+eq("a revision record for every observed session", revisions.map((r) => r.sessionID).sort(), [...markerIDs].sort());
+check("revision records are schema version 1", revisions.every((r) => r.version === 1));
+// OpenCode runs the prompt hook before the first model request, and that request carries no earlier turn: a clean start.
+check("every session started on a captured revision", revisions.every((r) => r.capture === "prompt" || r.capture === "first-request") && revisions.every((r) => typeof r.startRevisionId === "string"), JSON.stringify(revisions.map((r) => r.capture)));
+check("no context changed during wave 1, so every session is stable", revisions.every((r) => r.observed.length === 1 && r.observed[0].revisionId === r.startRevisionId));
+const startIDs = new Set(revisions.map((r) => r.startRevisionId));
+eq("concurrent sessions on identical files share one revision", startIDs.size, 1);
+const snapshotFiles = existsSync(path.join(evalDir, "snapshots")) ? readdirSync(path.join(evalDir, "snapshots")) : [];
+eq("one snapshot, named after the revision", snapshotFiles, [`${[...startIDs][0]}.json`]);
+const snapshot = readJson(path.join(evalDir, "snapshots", snapshotFiles[0] ?? "missing.json"));
+check("the snapshot lists context files with hashes only", snapshot.files.length >= 5 && snapshot.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256) && typeof f.sizeBytes === "number" && Object.keys(f).sort().join() === "path,sha256,sizeBytes"));
+check("the snapshot tracks AGENTS.md and .ai files but not source files or plugin data", snapshot.files.some((f) => f.path === "AGENTS.md") && snapshot.files.every((f) => f.path === "AGENTS.md" || f.path.startsWith(".ai/")), JSON.stringify(snapshot.files.map((f) => f.path)));
+check("revision records name the model and agent", revisions.every((r) => r.models.includes("mock/scripted") && r.agents.length > 0));
+check("revision records stay out of the read logs", [...bySession.values()].flat().every((r) => !("startRevisionId" in r) && !("revisionId" in r)));
+
 // --- privacy: no file contents on disk ----------------------------------------------------------------------------
-const everything = [...sessionFiles.map((f) => readFileSync(path.join(dataDir, f), "utf8")), ...markers.map((m) => JSON.stringify(m))].join("\n");
+const everything = [
+  ...sessionFiles.map((f) => readFileSync(path.join(dataDir, f), "utf8")),
+  ...markers.map((m) => JSON.stringify(m)),
+  ...revisions.map((r) => JSON.stringify(r)),
+  JSON.stringify(snapshot),
+].join("\n");
 for (const secret of ["Use TypeScript", "architecture line", "line 1234"]) {
   check(`file contents are not persisted (${secret})`, !everything.includes(secret));
 }
