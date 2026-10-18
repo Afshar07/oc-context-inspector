@@ -150,6 +150,26 @@ describe("plugin RPC analysis", () => {
       expect(calls[0]!.model).toEqual({ providerID: "cfg", id: "default-model" });
     }));
 
+  it("lets the request pick the model, over the configured one", () =>
+    withTempDir(async (dir) => {
+      await writeFile(`${dir}/AGENTS.md`, "# Agents");
+      const calls: { model?: unknown }[] = [];
+      const { ctx, rpc } = fakeContext(dir, { analysis: { model: "cfg/configured" } }, true, async (input) => (calls.push(input), { text: "ok" }));
+      await plugin.setup(ctx);
+      expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: [], model: "picked/model-x" })).toMatchObject({
+        model: "picked/model-x",
+      });
+      expect(await rpc.handlers.reviewProject!({ model: "picked/model-y" })).toMatchObject({ model: "picked/model-y" });
+      expect(calls.map((c) => c.model)).toEqual([
+        { providerID: "picked", id: "model-x" },
+        { providerID: "picked", id: "model-y" },
+      ]);
+      expect(await rpc.handlers.analyzeSession!({ sessionID: "s1", task: [], model: "not a model id" })).toEqual({
+        ok: false,
+        error: "Unknown model id: not a model id",
+      });
+    }));
+
   it("reports model failures as data instead of throwing", () =>
     withTempDir(async (dir) => {
       await writeFile(`${dir}/AGENTS.md`, "# Agents");

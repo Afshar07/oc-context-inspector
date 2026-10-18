@@ -16,10 +16,10 @@ export interface ICoverageClient {
   /** Undefined when the path is not a context file. */
   preview(sessionID: string, filePath: string): Promise<IFilePreview | undefined>;
   onRead(handler: (event: IReadEvent) => void): () => void;
-  /** Did this session read the context its task needed? */
-  analyzeSession(sessionID: string): Promise<IAnalysisResult>;
+  /** Did this session read the context its task needed? `model`: `provider/model`, or the configured default. */
+  analyzeSession(sessionID: string, model?: string): Promise<IAnalysisResult>;
   /** How all recorded sessions used the project's context files; `sessionID` only routes to the project. */
-  reviewProject(sessionID: string): Promise<IAnalysisResult>;
+  reviewProject(sessionID: string, model?: string): Promise<IAnalysisResult>;
 }
 
 export interface ICoverageState {

@@ -3,7 +3,7 @@ import type { Plugin } from "@opencode/plugin/tui";
 import type { PanelInput } from "@opencode/plugin/tui/context";
 import { createResource, createSignal, Match, Switch } from "solid-js";
 import { AnswerMarkdown } from "./AnswerMarkdown.js";
-import type { ICoverageClient } from "./source.js";
+import type { IAnalysisResult, ICoverageClient } from "./source.js";
 
 export type EAnalysisMode = "session" | "project";
 
@@ -12,6 +12,10 @@ export interface IAnalysisProps {
   readonly client: ICoverageClient;
   readonly panel: PanelInput;
   readonly mode: EAnalysisMode;
+  /** `provider/model` picked for this run; undefined for the configured default. */
+  readonly model: string | undefined;
+  /** Opens a follow-up session seeded with this answer. */
+  readonly onContinue: (answer: Extract<IAnalysisResult, { ok: true }>) => Promise<void>;
 }
 
 const TITLES: Readonly<Record<EAnalysisMode, string>> = {
@@ -24,16 +28,29 @@ export function Analysis(props: IAnalysisProps) {
   const theme = props.ctx.theme;
   const [run, setRun] = createSignal(0);
   const [result] = createResource(
-    () => ({ sessionID: props.panel.sessionID, mode: props.mode, run: run() }),
-    ({ sessionID, mode }) =>
-      mode === "session" ? props.client.analyzeSession(sessionID) : props.client.reviewProject(sessionID),
+    () => ({ sessionID: props.panel.sessionID, mode: props.mode, model: props.model, run: run() }),
+    ({ sessionID, mode, model }) =>
+      mode === "session" ? props.client.analyzeSession(sessionID, model) : props.client.reviewProject(sessionID, model),
   );
+
+  const [continuing, setContinuing] = createSignal(false);
+  const continueInSession = async () => {
+    const answer = result();
+    if (!answer?.ok || continuing()) return;
+    setContinuing(true);
+    try {
+      await props.onContinue(answer);
+    } finally {
+      setContinuing(false);
+    }
+  };
 
   props.ctx.keymap.layer(() => ({
     enabled: props.panel.focused,
     commands: [
       { title: "Close analysis", bind: "escape", run: () => props.panel.close() },
       { title: "Run analysis again", bind: "r", run: () => void (result.loading || setRun((n) => n + 1)) },
+      { title: "Continue in a session", bind: "n", run: () => void continueInSession() },
     ],
   }));
 
@@ -69,7 +86,9 @@ export function Analysis(props: IAnalysisProps) {
           const r = result();
           const model = r?.ok ? `${r.model} · ` : "";
           const sessions = r?.ok && r.sessionCount !== undefined ? `${r.sessionCount} sessions · ` : "";
-          return `${model}${sessions}r rerun · esc close`;
+          if (continuing()) return "Opening a session…";
+          const next = r?.ok ? "n continue in session · " : "";
+          return `${model}${sessions}${next}r rerun · esc close`;
         })()}
       </text>
     </box>

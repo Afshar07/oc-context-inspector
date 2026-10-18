@@ -2,6 +2,59 @@ import type { Plugin } from "@opencode/plugin/tui";
 import { ContextInspectorRpc } from "../rpc.js";
 import type { ICoverageClient } from "./source.js";
 
+/**
+ * Opens a follow-up session holding `message` queued (not sent): the agent sees it
+ * only with the user's first instruction. A session analysis forks the analyzed
+ * session so its history comes along; a project review starts a fresh session.
+ * Returns the new session's ID.
+ */
+export async function startFollowUpSession(
+  ctx: Plugin.Context,
+  input: { readonly fork: boolean; readonly sessionID: string; readonly title: string; readonly message: string },
+): Promise<string> {
+  // Session calls are routed by session ID; only a new session needs the project's directory.
+  const directory = ctx.data.session.get(input.sessionID)?.location.directory;
+  const session = input.fork
+    ? await ctx.client.session.fork({ sessionID: input.sessionID })
+    : await ctx.client.session.create({ title: input.title, ...(directory && { location: { directory } }) });
+  // A fork keeps the original title; the rename is cosmetic, so a failure is not fatal.
+  if (input.fork) await ctx.client.session.update({ sessionID: session.id, title: input.title }).catch(() => {});
+  await ctx.client.session.synthetic({
+    sessionID: session.id,
+    text: input.message,
+    description: "Context review",
+    resume: false,
+  });
+  return session.id;
+}
+
+/** "" in the picker: let the server use `analysis.model`, or OpenCode's default. */
+export const DEFAULT_MODEL = "";
+
+/**
+ * Asks which model should run the analysis, preselecting `current`. Resolves to a
+ * `provider/model` ID, DEFAULT_MODEL, or undefined when the user cancels.
+ */
+export async function pickAnalysisModel(ctx: Plugin.Context, sessionID: string, current: string): Promise<string | undefined> {
+  const location = ctx.data.session.get(sessionID)?.location;
+  await ctx.data.location.model.sync(location).catch(() => {});
+  const models = ctx.data.location.model.list(location) ?? [];
+  return ctx.ui.dialog.select({
+    title: "Model for context analysis",
+    placeholder: "Search models",
+    current,
+    options: [
+      { title: "Default (from config)", value: DEFAULT_MODEL, description: "analysis.model, or OpenCode's default model" },
+      ...models.map((m) => ({
+        title: m.name,
+        value: `${m.providerID}/${m.id}`,
+        description: `${m.providerID}/${m.id}`,
+        category: m.providerID,
+      })),
+    ],
+  });
+}
+
 /** The session's user messages: the task the analysis judges relevance against. */
 async function userPrompts(ctx: Plugin.Context, sessionID: string): Promise<string[]> {
   await ctx.data.session.message.sync(sessionID).catch(() => {});
@@ -24,8 +77,8 @@ export function rpcCoverageClient(ctx: Plugin.Context): ICoverageClient {
       return result.found ? result.preview : undefined;
     },
     onRead: (handler) => rpc.events.on("read", (event) => handler(event.data)),
-    analyzeSession: async (sessionID) =>
-      rpc.analyzeSession({ sessionID, task: await userPrompts(ctx, sessionID) }, routed(sessionID)),
-    reviewProject: (sessionID) => rpc.reviewProject({}, routed(sessionID)),
+    analyzeSession: async (sessionID, model) =>
+      rpc.analyzeSession({ sessionID, task: await userPrompts(ctx, sessionID), ...(model && { model }) }, routed(sessionID)),
+    reviewProject: (sessionID, model) => rpc.reviewProject({ ...(model && { model }) }, routed(sessionID)),
   };
 }

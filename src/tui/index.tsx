@@ -3,8 +3,9 @@ import { Plugin } from "@opencode/plugin/tui";
 import { createSignal, Match, Show, Switch } from "solid-js";
 import type { IFileCoverage } from "../types.js";
 import { Analysis, type EAnalysisMode } from "./Analysis.js";
-import { rpcCoverageClient } from "./client.js";
+import { DEFAULT_MODEL, pickAnalysisModel, rpcCoverageClient, startFollowUpSession } from "./client.js";
 import { describeFile, STATUS_GLYPH, visibleFiles } from "./format.js";
+import { handoffMessage } from "./handoff.js";
 import { Preview } from "./Preview.js";
 import { Sidebar } from "./Sidebar.js";
 import type { ICoverageClient } from "./source.js";
@@ -23,15 +24,41 @@ export default Plugin.define({
     const client = rpcCoverageClient(ctx);
     const [selected, setSelected] = createSignal<string>();
     // Durable, so the choice survives TUI restarts.
-    const [prefs, setPrefs] = ctx.storage.store("prefs", { initial: { showUnread: false } });
+    const [prefs, setPrefs] = ctx.storage.store("prefs", { initial: { showUnread: false, analysisModel: DEFAULT_MODEL } });
+    // Model picked for the analysis panel currently open; read by its resource, so a new pick reruns it.
+    const [analysisModel, setAnalysisModel] = createSignal<string>();
     const browse = createBrowseState(ctx, client, () => prefs.showUnread);
 
     const openPreview = (filePath: string) => {
       setSelected(filePath);
       if (!ctx.ui.panel.open(PANEL_NAME)) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
     };
-    const openAnalysis = (mode: EAnalysisMode) => {
+    const openAnalysis = async (mode: EAnalysisMode, sessionID: string) => {
+      const picked = await pickAnalysisModel(ctx, sessionID, prefs.analysisModel ?? DEFAULT_MODEL);
+      if (picked === undefined) return;
+      await setPrefs((draft) => {
+        draft.analysisModel = picked;
+      });
+      setAnalysisModel(picked === DEFAULT_MODEL ? undefined : picked);
       if (!ctx.ui.panel.open(ANALYSIS_PANELS[mode])) ctx.ui.toast.show({ variant: "warning", message: "Open a session first" });
+    };
+    // Follow-up session for acting on a review: the review waits, queued, for the user's first instruction.
+    const continueInSession = (mode: EAnalysisMode, sessionID: string) => async (answer: { text: string; model: string; sessionCount?: number }) => {
+      try {
+        const files = mode === "session" ? ((await client.coverage(sessionID).catch(() => undefined))?.files ?? []) : [];
+        const title = ctx.data.session.get(sessionID)?.title;
+        const id = await startFollowUpSession(ctx, {
+          fork: mode === "session",
+          sessionID,
+          title: mode === "session" ? `Context fixes: ${title ?? "session"}` : "Context fixes: project review",
+          message: handoffMessage({ mode, answer: answer.text, model: answer.model, sessionCount: answer.sessionCount, files }),
+        });
+        ctx.ui.panel.close();
+        if (!ctx.ui.tabs.focus(id)) ctx.ui.router.navigate({ type: "session", sessionID: id });
+        ctx.ui.toast.show({ variant: "info", message: "Review queued. Tell the agent what to change." });
+      } catch (error) {
+        ctx.ui.toast.show({ variant: "error", message: `Could not open a session: ${(error as Error).message}` });
+      }
     };
     const currentSession = () => {
       const route = ctx.ui.router.current();
@@ -60,10 +87,24 @@ export default Plugin.define({
               {(filePath) => <Preview ctx={ctx} client={client} panel={input} filePath={filePath()} />}
             </Match>
             <Match when={input.name === ANALYSIS_PANELS.session}>
-              <Analysis ctx={ctx} client={client} panel={input} mode="session" />
+              <Analysis
+                ctx={ctx}
+                client={client}
+                panel={input}
+                mode="session"
+                model={analysisModel()}
+                onContinue={continueInSession("session", input.sessionID)}
+              />
             </Match>
             <Match when={input.name === ANALYSIS_PANELS.project}>
-              <Analysis ctx={ctx} client={client} panel={input} mode="project" />
+              <Analysis
+                ctx={ctx}
+                client={client}
+                panel={input}
+                mode="project"
+                model={analysisModel()}
+                onContinue={continueInSession("project", input.sessionID)}
+              />
             </Match>
           </Switch>
         ),
@@ -100,7 +141,10 @@ export default Plugin.define({
                 palette: true,
                 slash: { name: "context-analyze" },
                 enabled: () => currentSession() !== undefined,
-                run: () => openAnalysis("session"),
+                run: () => {
+                  const sessionID = currentSession();
+                  if (sessionID) void openAnalysis("session", sessionID);
+                },
               },
               {
                 id: "context-inspector.review",
@@ -110,7 +154,10 @@ export default Plugin.define({
                 palette: true,
                 slash: { name: "context-review" },
                 enabled: () => currentSession() !== undefined,
-                run: () => openAnalysis("project"),
+                run: () => {
+                  const sessionID = currentSession();
+                  if (sessionID) void openAnalysis("project", sessionID);
+                },
               },
               {
                 id: "context-inspector.toggle-unread",

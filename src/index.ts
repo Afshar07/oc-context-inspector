@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { AnalysisService } from "./analysis.js";
 import { CoverageService } from "./coverage.js";
 import { ContextPathMatcher, DEFAULT_CONTEXT_PATHS } from "./matcher.js";
+import { formatModelRef, parseModelRef } from "./model-ref.js";
 import { ContextInspectorRpc } from "./rpc.js";
 import { JsonlContextReadStore } from "./store.js";
 import { ContextReadTracker } from "./tracker.js";
@@ -11,20 +12,13 @@ import type { IContextInspectorOptions, IContextReadStore, IModelRef } from "./t
 export { ContextPathMatcher, ContextReadTracker, CoverageService, JsonlContextReadStore };
 export { ContextInspectorRpc } from "./rpc.js";
 export { readSessionRecords } from "./store.js";
+export { parseModelRef } from "./model-ref.js";
 export * from "./types.js";
 
 function stringList(value: unknown, fallback: readonly string[]): readonly string[] {
   return Array.isArray(value) && value.every((v) => typeof v === "string") && value.length > 0
     ? value
     : fallback;
-}
-
-/** `provider/model` or `provider/model#variant`, as OpenCode writes model IDs. */
-export function parseModelRef(value: unknown): IModelRef | undefined {
-  if (typeof value !== "string") return undefined;
-  const match = /^([^/#]+)\/([^#]+)(?:#(.+))?$/.exec(value);
-  if (!match) return undefined;
-  return { providerID: match[1]!, id: match[2]!, ...(match[3] !== undefined && { variant: match[3] }) };
 }
 
 export function resolveOptions(
@@ -47,7 +41,6 @@ export function resolveOptions(
 
 const failure = (error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) });
 
-const modelLabel = (m: IModelRef) => `${m.providerID}/${m.id}${m.variant ? `#${m.variant}` : ""}`;
 
 function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: AnalysisService, configured?: IModelRef) {
   // Resolved per call and passed explicitly, so the label shown is the model that actually ran.
@@ -56,9 +49,15 @@ function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: A
     const fallback = await ctx.model.default().catch(() => undefined);
     return fallback?.data ? { providerID: fallback.data.providerID, id: fallback.data.id } : undefined;
   };
-  const withModel = async <T extends object>(run: (model: IModelRef | undefined) => Promise<T>) => {
-    const model = await resolveModel();
-    return { ok: true as const, ...(await run(model)), model: model ? modelLabel(model) : "OpenCode default" };
+  /** `requested` (the user's pick in the TUI) wins over the configured and default models. */
+  const withModel = async <T extends object>(
+    requested: string | undefined,
+    run: (model: IModelRef | undefined) => Promise<T>,
+  ) => {
+    const picked = requested === undefined ? undefined : parseModelRef(requested);
+    if (requested !== undefined && !picked) throw new Error(`Unknown model id: ${requested}`);
+    const model = picked ?? (await resolveModel());
+    return { ok: true as const, ...(await run(model)), model: model ? formatModelRef(model) : "OpenCode default" };
   };
 
   return ctx.rpc.register(ContextInspectorRpc, {
@@ -68,9 +67,9 @@ function registerRpc(ctx: Plugin.Context, coverage: CoverageService, analysis: A
       return preview ? { found: true as const, preview } : { found: false as const };
     },
     // Model failures (no provider, rate limits) are answers for the TUI to show, not RPC faults.
-    analyzeSession: ({ sessionID, task }) =>
-      withModel(async (model) => ({ text: await analysis.analyzeSession(sessionID, task, model) })).catch(failure),
-    reviewProject: () => withModel((model) => analysis.reviewProject(model)).catch(failure),
+    analyzeSession: ({ sessionID, task, model }) =>
+      withModel(model, async (m) => ({ text: await analysis.analyzeSession(sessionID, task, m) })).catch(failure),
+    reviewProject: ({ model }) => withModel(model, (m) => analysis.reviewProject(m)).catch(failure),
   });
 }
 

@@ -58,7 +58,9 @@ File contents are read on demand for display and never written anywhere.
 
 ## Model analysis
 
-Two commands ask a model to interpret the recorded reads. The answer opens in the session panel
+Two commands ask a model to interpret the recorded reads. Each first asks which model to use (a searchable list of
+your models; "Default (from config)" uses `analysis.model`, or OpenCode's default model; the last pick is
+remembered; `esc` cancels). The answer opens in the session panel
 (`r` reruns, `esc` closes) and its footer names the model that ran. Both use `ctx.generate.text`, so they run outside
 the conversation and do not change it.
 
@@ -66,6 +68,15 @@ the conversation and do not change it.
   reads look irrelevant? The task is the session's user messages.
 * `/context-review`: **all recorded sessions in the project.** Which files or sections are never or rarely read, which
   are only partly read (candidates to split or trim), and a short list of concrete edits.
+
+**Acting on a review: `n` in the panel** opens a follow-up session where an agent can make the changes:
+
+* after `/context-analyze` it **forks** the analyzed session, so the agent has the full conversation and task;
+* after `/context-review` it starts a **new** session in the project (no history; the review names the files).
+
+The review (plus, for a session analysis, the list of what was read) is added as a **queued** message: nothing runs
+until you type an instruction, and the agent then receives the review first and your instruction second. It has the
+normal tools and permissions of any session, so it can read and edit files.
 
 What is sent to the model: read metadata (status, line ranges, counts; per section, whether it was fully, partly or
 not read, or in how many sessions) plus each context file's **outline**: its Markdown headings with line numbers.
@@ -80,7 +91,7 @@ even though the agent never read them; contents are capped at 8,000 characters p
 | `tools` | `["read"]` | tools to inspect |
 | `dataDir` | `.opencode/context-inspector` | output directory (relative to the project) |
 | `autoLoaded` | `["AGENTS.md"]` | project-relative files OpenCode injects on its own; shown as `◌` instead of unread |
-| `analysis.model` | your default model | model for `/context-analyze` and `/context-review`, as `provider/model` or `provider/model#variant` |
+| `analysis.model` | your default model | the "Default (from config)" choice in the model picker, as `provider/model` or `provider/model#variant` |
 | `analysis.includeContent` | `false` | also send file contents to the model, not just heading outlines |
 
 ## Install

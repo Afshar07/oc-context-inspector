@@ -49,14 +49,17 @@ export const ContextInspectorRpc = Rpc.define({
     },
     /** Model review of one session's reads; `task` is the user's messages, for relevance. */
     analyzeSession: {
-      input: portable(Schema.Struct({ sessionID: Schema.String, task: Schema.Array(Schema.String) })),
+      // `model`: `provider/model[#variant]` picked in the TUI; the configured or default model when absent.
+      input: portable(
+        Schema.Struct({ sessionID: Schema.String, task: Schema.Array(Schema.String), model: Schema.optionalKey(Schema.String) }),
+      ),
       output: portable(
         Schema.Union([Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, model: Schema.String }), Failure]),
       ),
     },
     /** Model review of how every recorded session used the project's context files. */
     reviewProject: {
-      input: portable(Schema.Struct({})),
+      input: portable(Schema.Struct({ model: Schema.optionalKey(Schema.String) })),
       output: portable(
         Schema.Union([
           Schema.Struct({ ok: Schema.Literal(true), text: Schema.String, sessionCount: Schema.Number, model: Schema.String }),
