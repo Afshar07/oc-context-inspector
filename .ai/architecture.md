@@ -30,7 +30,7 @@ Both halves share `id: "opencode-context-inspector"` and `src/types.ts`. Update 
 
 ## TUI modules (`src/tui/`)
 
-`timeline.ts` and `descendants.ts` build the reviewer timeline (below). `index.tsx` registers slots (`sidebar.content`, `session.panel`, `app`) and keymap layers (commands plus browse mode). `client.ts` wraps the RPC, the follow-up-session creation and the timeline loading (`sessionTimeline`). `source.ts` is the data hook/resource layer. `format.ts`, `markdown-parse.ts` and `handoff.ts` are pure logic (unit-tested); `Sidebar`, `Preview`, `Analysis`, `AnswerMarkdown` are Solid components.
+`timeline.ts` and `descendants.ts` build the reviewer timeline (below). `index.tsx` registers slots (`sidebar.content`, `session.panel`, `app`) and keymap layers (commands plus browse mode). `client.ts` wraps the RPC, the follow-up-session creation and the timeline loading (`sessionTimeline`). `source.ts` is the data hook/resource layer. `format.ts`, `markdown-parse.ts` (answers, plus `parseSourceLines` for styling `.md` files in `Preview` one-to-one with file lines; heading hashes are hidden, list and quote markers kept) and `handoff.ts` are pure logic (unit-tested); `Sidebar`, `Preview`, `Analysis`, `AnswerMarkdown` are Solid components.
 
 ## Data flow
 

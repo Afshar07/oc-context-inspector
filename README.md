@@ -70,7 +70,7 @@ the *requested* one because the read left no delivery record (older data). `+N s
 session; they do not change the status, because the lead's context holds what the lead read itself.
 
 **Preview panel.** Opens in the session panel and shows the file *as it is now*: lines the agent read are marked
-with `▌` and highlighted, the rest are dimmed. It follows new reads live. `esc` closes it while focused.
+with `▌` and highlighted, the rest are dimmed. It follows new reads live. `esc` closes it while focused. Markdown files (`.md`, `.mdx`) are styled line by line (headings with their `#` hidden, lists, quotes, code, bold/italic) without changing line numbers or the read marks.
 File contents are read on demand for display and never written anywhere. A warning line appears when the text may not
 be what the agent received (file changed, deleted, or ranges only estimated), and each agent that read the file is
 listed under the title:

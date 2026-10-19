@@ -61,3 +61,37 @@ export function parseMarkdown(text: string): IBlock[] {
   if (code) blocks.push({ kind: "code", lines: code });
   return blocks;
 }
+
+export type SourceKind = "heading" | "item" | "quote" | "fence" | "code" | "text";
+
+/** One source line of a Markdown file, styled but still one-to-one with the file's lines (for gutters and read marks). */
+export interface ISourceLine {
+  readonly kind: SourceKind;
+  /** Literal leading text kept as written: list indent and marker, quote marker. Empty for headings, whose hashes are hidden. */
+  readonly prefix: string;
+  readonly inlines: readonly IInline[];
+}
+
+export function isMarkdownPath(filePath: string): boolean {
+  return /\.(md|mdx|markdown)$/i.test(filePath);
+}
+
+/** Classifies each line without changing the line count; fenced code lines are not parsed for inline spans. */
+export function parseSourceLines(lines: readonly string[]): ISourceLine[] {
+  let fence: string | undefined;
+  return lines.map((line): ISourceLine => {
+    const opener = /^\s*(```|~~~)/.exec(line)?.[1];
+    if (opener && (!fence || opener === fence)) {
+      fence = fence ? undefined : opener;
+      return { kind: "fence", prefix: line, inlines: [] };
+    }
+    if (fence) return { kind: "code", prefix: "", inlines: [{ text: line }] };
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    if (heading) return { kind: "heading", prefix: "", inlines: parseInline(heading[1]!) };
+    const item = /^(\s*(?:[-*+]|\d+[.)])\s+)(.*)$/.exec(line);
+    if (item) return { kind: "item", prefix: item[1]!, inlines: parseInline(item[2]!) };
+    const quote = /^(\s*>\s?)(.*)$/.exec(line);
+    if (quote) return { kind: "quote", prefix: quote[1]!, inlines: parseInline(quote[2]!) };
+    return { kind: "text", prefix: "", inlines: parseInline(line) };
+  });
+}

@@ -4,6 +4,7 @@ import type { PanelInput } from "@opencode/plugin/tui/context";
 import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { agentLines, describeFile, isLineRead, previewNotice, STATUS_GLYPH } from "./format.js";
 import { concerns, type ICoverageClient } from "./source.js";
+import { isMarkdownPath, parseSourceLines, type IInline } from "./markdown-parse.js";
 import { statusColor } from "./theme.js";
 
 export interface IPreviewProps {
@@ -36,6 +37,10 @@ export function Preview(props: IPreviewProps) {
     enabled: props.panel.focused,
     commands: [{ title: "Close context preview", bind: "escape", run: () => props.panel.close() }],
   }));
+
+  const markdown = () => isMarkdownPath(props.filePath);
+  const styled = () => (markdown() ? parseSourceLines(preview()?.lines ?? []) : []);
+  const md = () => theme.markdown;
 
   const gutter = () => String(preview()?.lines.length ?? 0).length;
 
@@ -85,9 +90,33 @@ export function Preview(props: IPreviewProps) {
                   {read() ? "▌" : " "}
                   {String(index() + 1).padStart(gutter())}{" "}
                 </text>
-                <text wrapMode="none" fg={read() ? theme.text.base : theme.text.faint}>
-                  {line}
-                </text>
+                <Show
+                  when={markdown() && styled()[index()]}
+                  fallback={
+                    <text wrapMode="none" fg={read() ? theme.text.base : theme.text.faint}>
+                      {line}
+                    </text>
+                  }
+                >
+                  {(s) => {
+                    const fg = () => {
+                      if (!read()) return theme.text.faint;
+                      const kind = s().kind;
+                      return kind === "heading" ? md().heading : kind === "item" ? md().listItem : kind === "fence" || kind === "code" ? md().code : kind === "quote" ? theme.text.muted : theme.text.base;
+                    };
+                    const span = (part: IInline) => {
+                      const color = part.code && read() ? md().code : undefined;
+                      const text = color ? <span style={{ fg: color }}>{part.text}</span> : part.text;
+                      return part.bold ? <b>{text}</b> : part.italic ? <i>{text}</i> : text;
+                    };
+                    return (
+                      <text wrapMode="none" fg={fg()}>
+                        {s().prefix}
+                        <For each={s().inlines}>{(part) => (s().kind === "heading" ? <b>{part.text}</b> : span(part))}</For>
+                      </text>
+                    );
+                  }}
+                </Show>
               </box>
             );
           }}
